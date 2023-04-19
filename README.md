@@ -1,5 +1,5 @@
 **README**
-
+ 
 *Folders:*
 - code: contains R (.R) and R markdown (.Rmd) files. Running these reads in data from "raw_data" folder, generates intermediate results in "int_data folder" that are also used in the code, and generates final results in "results" folder. 
 - results: 
