@@ -1,0 +1,22 @@
+.Rproj.user
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+Archived files/
+Calc LUC_EnergyAg/
+Energy and GHG Analysis (2019)/
+Energy-Ag/
+Manuscript input and old drafts/
+LandDemand/
+MAPSPAM/
+FAOSTAT/
+Internal notes.md
+.html
+manuscript/
+code/old_code/
+ 
+#could add back in by removing from ignore file
+int_data/
+raw_data/
+results/

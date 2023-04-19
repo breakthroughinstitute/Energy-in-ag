@@ -1,0 +1,42 @@
+---
+title: "World_carbonloss"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+setwd("int_data/qgis_output/")
+library(tidyverse)
+
+#Combine output from QGIS into one dataframe
+f <- list.files(pattern = '*.xlsx', recursive=T)
+df.list <- lapply(f,readxl::read_excel)
+names(df.list) <- sub("\\..*", "", f)
+carbon <- bind_rows(df.list, .id = "id")
+carbon <- select(carbon, id, lucsum, soilsum, vegsum , ADMIN, ADM0_A3, NAME, NAME_LONG, BRK_NAME)
+```
+
+```{r Weighted Avg. Veg & Soil Carbon densities by crop}
+#input is tC for soilsum and vegsum, and ha for lucsum; we calculate avg C levels by dividing soil & veg C by luc values, and convert to kg CO2
+
+c_to_co2 <- 44/12
+tons_to_kg <- 1000
+pct_soil_loss_h <- .25 #percent of soil carbon lost when converted to cropland, per Houghton et al   
+pct_soil_loss_s <- .4 #percent of soil carbon lost when converted to cropland, per Searchinger et al 2018
+
+weighted_potential_co2_loss <- carbon %>%
+        mutate(soil_H = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
+               soil_S = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
+               veg = ((vegsum/lucsum) * c_to_co2 * tons_to_kg),
+               tot_H = soil_H+veg,
+               tot_S = soil_S+veg) %>%
+        select(-c(soil_H, soil_S, veg, lucsum, soilsum, vegsum)) %>% 
+        pivot_wider(names_from = id,
+                    names_glue = "{id}_{.value}",
+                    values_from = c(tot_H, tot_S))
+
+#save to int_data folder
+write_csv(x = weighted_potential_co2_loss, file = "../LUC_CO2_crops.csv")
+
+#clean
+rm(carbon, df.list, weighted_potential_co2_loss, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
+```

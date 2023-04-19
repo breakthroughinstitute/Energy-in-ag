@@ -1,0 +1,86 @@
+---
+title: "Calculate Calories Produced per Hectare Cropland"
+output: html_notebook
+author: "Dan Rejto"
+date: "Apr 13, 23"
+---
+
+```{r initialize}
+library(tidyverse)
+```
+
+```{r Load data}
+prod <- read_csv("../raw_data/faostat/production_all_crops.csv") %>% select(country = Area, year = Year, crop = Item, production)
+#units for production are in tonnes
+
+cal_conversions <- read_csv("../raw_data/cal_per_tonne_by_crop.csv")
+
+cropland <- read_csv("../raw_data/faostat/cropland.csv") %>% select(-Domain, -Element, -Item, cropland = Value, country = Area, year = Year) #units for cropland are in ha
+``` 
+
+```{r Check if crop types in cal_conversions match those in FAOSTAT_production_all_crops and replace non-matching crop names }
+crop_FAO <- as.data.frame(unique(prod$crop))
+crop_cal<- as.data.frame(unique(cal_conversions$crop))
+colnames(crop_FAO) <- "crop"
+colnames(crop_cal) <- "crop"
+crop_diff <- anti_join(crop_FAO,crop_cal,by = "crop") #these crop types are found in the crop_FAO dataset but not found in the crop_cal dataset, 61 different crop names
+crop_diff2 <- anti_join(crop_cal,crop_FAO,by = "crop") #all crop types in crops_cal are found in crop_FAO
+
+#Checked crop names in crop_diff against names in crop_cal by eye in case there are spelling differences, no matches
+``` 
+
+```{r Check if country names consistent}
+cropland_countries <- unique(cropland$country) #list of unique countries in cropland data
+
+#list countries in cropland data not in production data
+t <- cropland_countries %in% unique(prod$country)  
+cropland_countries[!t] 
+#country names that are in cropland data but not production data. China missing because China is listed several times in cropland, as mainland, hong kong, Taiwan, and the sum of the three. for prodcution, its just listed as mainland, hong kong, and taiwan, which is appropriate for our analysis. 
+```
+
+```{r Check for duplicates}
+prod %>% duplicated() %>% sum()   #add up number of duplicated area rows - 0
+cropland %>% duplicated() %>% sum()   #add up number of duplicated yield rows - 0
+```
+
+```{r Convert production (tons) to kcal}
+#merge kcal per tonne by crop values with dataframe on production (in tons) per crop and country
+prod <- prod %>% inner_join(cal_conversions) %>% 
+  mutate(Kcal = production * kcal_per_tonne)
+```
+
+```{r Basic exploratory analysis - check for Os and NAs in dataset}
+sum(is.na(prod$Kcal)) #35068 NAs, about 9% of rows
+prod %>% group_by(year) %>% summarize(sum(is.na(Kcal))) #NAs not evenly distributed in time; concentrated before ~1990
+prod %>% group_by(crop) %>% summarize("na"=sum(is.na(Kcal))) %>% arrange(desc(na)) #NAs concentrated in some crops e.g. pumpokings, beans, carrots, cabbage. few for major staples like wheat, oats, fonio, bambara,rice, opil palm, maize
+prod %>% group_by(country) %>% summarize("na"=sum(is.na(Kcal))) %>% arrange(desc(na)) #wide dispersion in NAs by country
+```
+
+```{r Remove incomplete country-crop rows}
+#given future reliance on panel data about yields (in kcal) over time in countries, and time trend in NAs, keeping NAs could bias future results. E.g. it would make it seem like yields rose quicker after 1990 than they really did just because more data was reported. So we omit country-crop combinations that are incomplete
+
+na_tots <- prod %>% group_by(crop, country) %>% summarize(na = sum(is.na(production)))
+prod <- left_join(prod, na_tots)
+prod2 <- prod %>% filter(na==0)
+
+sum(prod2$Kcal) / sum(prod$Kcal, na.rm=T) #removing NAs only reduced total production in kcal from 1961-2017 by ~0.2%. We therefore implement this filtering.
+prod <- prod2
+```
+
+```{r Calcalate kcal per hectare by country and year}
+#sum kcal across all crops, by year and country
+tot_prod <- prod %>% 
+  group_by(country, year) %>% 
+  summarize(tot_kcal = sum(Kcal))
+
+#join cropland and production datasets
+ylds <- inner_join(tot_prod, cropland)
+#this removes some rows, but this is not due to a mismatch in country naming across the datasets, but rather differences in data completeness across datasets
+
+#calculate calorie yields per ha
+ylds <- ylds %>% mutate(kcal_ha = tot_kcal/cropland)
+```
+
+```{r Save}
+write_csv(ylds, "../int_data/prod.cropland.csv")
+```
