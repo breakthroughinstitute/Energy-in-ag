@@ -45,19 +45,42 @@ yam <- filter(kcal, crop == "Yams")
 swp <- filter(kcal, crop == "Sweet potatoes")
 swp_yam <- c("Sweet Potato and Yams", as.numeric((yam$kcal_per_tonne + swp$kcal_per_tonne)/2)) #calculate average kcal/ton for sweet potato and yam
 kcal <- rbind(kcal,swp_yam)  #add to dataframe of kcal conversions
-rm(yam, swp, swp_yam) #clean environment
 kcal$kcal_per_tonne <- as.numeric(kcal$kcal_per_tonne)
 
-#Combine kcal conversions for pulses ( dry beans, dry broad beans, dry peas, chickpeas, cow peas, pigeon peas, lentils, Bambara beans, vetches, lupins) since FOFA dataset only includes values for "dried pulses"
-dried_pulses <- tibble("Dried pulses", mean(kcal[c(which(kcal$crop %in% c("Bambara beans", "Beans, dry", "Broad beans, horse beans, dry", "Chick peas", "Lentils", "Cow peas, dry", "Peas, dry", "Pigeon peas", "Lupins", "Vetches"))), 2]$kcal_per_tonne))
+#Combine kcal conversions for pulses since FOFA dataset only includes values for "dried pulses"
+dried_pulses <- tibble(crop = "Dried pulses", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
+  "Bambara beans", "Beans, dry", "Broad beans, horse beans, dry", "Chick peas", "Lentils", "Cow peas, dry", 
+  "Peas, dry", "Pigeon peas", "Lupins", "Vetches"))), 2]$kcal_per_tonne))
 kcal <- rbind(kcal,dried_pulses)  #add to dataframe of kcal conversions
-rm(dried_pulses) #clean environment
 
 #Combine kcal conversions for other vegetables
+other_veg <- tibble(crop = "Other vegetables", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
+    "Artichokes", "Asparagus",  "Beans, green", "Cabbages and other brassicas", "Carrots and turnips", "Cauliflowers and broccoli", 
+    "Chillies and peppers, dry", "Chillies and peppers, green","Cucumbers and gherkins", "Eggplants (aubergines)", "Lettuce and chicory", 
+    "Okra","Onions, dry", "Onions, shallots, green", "Peas, green", "Pumpkins, squash and gourds", "Spinach", "String beans", "Tomatoes"
+    ))), 2]$kcal_per_tonne))
+kcal <- rbind(kcal,other_veg)  #add to dataframe of kcal conversions
+
 #Combine kcal conversions for other fruits
-#Combine kcal conversions for  other cereals, 
+other_fruit <- tibble(crop = "Other fruit", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
+  "Apples", "Apricots", "Avocados", "Blueberries", "Cashewapple", "Cherries", "Cranberries", 
+  "Currants", "Dates", "Figs", "Gooseberries", "Grapefruit (inc. pomelos)", "Grapes", "Kiwi fruit",
+  "Lemons and limes", "Mangoes, mangosteens, guavas", "Oranges", "Papayas", "Peaches and nectarines", 
+  "Pears", "Persimmons", "Pineapples", "Plums and sloes", "Quinces", "Raspberries", "Strawberries", 
+  "Tangerines, mandarins, clementines, satsumas", "Watermelons"
+  ))), 2]$kcal_per_tonne))
+kcal <- rbind(kcal,other_fruit)  #add to dataframe of kcal conversions
+
+#Combine kcal conversions for  other cereals 
+other_cereals <- tibble(crop = "Other cereals", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
+  "Buckwheat", "Canary seed", "Fonio", "Grain, mixed", "Oats", "Quinoa", "Rye", "Triticale"
+  ))), 2]$kcal_per_tonne))
+kcal <- rbind(kcal,other_cereals)  #add to dataframe of kcal conversions
+
 #Combine kcal conversions for other oilseeds
 #Combine kcal conversions for other roots and tubers
+
+rm(dried_pulses, yam, swp, swp_yam, other_veg, other_fruits, other_cereals, other_oilseeds, other_roots) #clean environment
 
 #rename items that we we filter to. NOTE that cotton could be include or excluded based on analyst's choice.
 d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of barley" = "Barley", "Growing of cassava" = "Cassava",
@@ -68,7 +91,9 @@ d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of bar
                         "Growing of sesame seed" ="Sesame seed", "Growing of sorghum" = "Sorghum", "Growing of sugar beet" =  "Sugar beet",
                         "Growing of sugar cane" =  "Sugar cane", "Growing of sunflower seed" =  "Sunflower seed", "Growing of wheat" = "Wheat",
                         "Growing of olives" =  "Olives", "Growing of plantains" =  "Plantains and others", "Growing of soybeans" = "Soybeans",
-                        "Growing of sweet potato and yams" = "Sweet Potato and Yams")
+                        "Growing of sweet potato and yams" = "Sweet Potato and Yams",
+                        "Growing of other vegetables" = "Other vegetables", "Growing of dried pulses" = "Dried pulses", 
+                        "Growing of other fruits" = "Other fruit", "Growing of other cereals" = "Other cereals")
 
 #join kcal/ton to primary dataframe
 d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
