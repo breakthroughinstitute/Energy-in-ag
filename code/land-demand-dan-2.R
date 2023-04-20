@@ -78,22 +78,27 @@ other_cereals <- tibble(crop = "Other cereals", kcal_per_tonne = mean(kcal[c(whi
 kcal <- rbind(kcal,other_cereals)  #add to dataframe of kcal conversions
 
 #Combine kcal conversions for other oilseeds
+other_oilseeds <- tibble(crop = "Other oilseeds", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
+  "Hempseed", "Kapokseed in shell", "Karite nuts (sheanuts)", "Linseed", "Melonseed", "Poppy seed", "Safflower seed", 
+  ))), 2]$kcal_per_tonne))
+kcal <- rbind(kcal,other_oilseeds)  #add to dataframe of kcal conversions
+
 #Combine kcal conversions for other roots and tubers
 
-rm(dried_pulses, yam, swp, swp_yam, other_veg, other_fruits, other_cereals, other_oilseeds, other_roots) #clean environment
+rm(dried_pulses, yam, swp, swp_yam, other_veg, other_fruit, other_cereals, other_oilseeds, other_roots) #clean environment
 
 #rename items that we we filter to. NOTE that cotton could be include or excluded based on analyst's choice.
 d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of barley" = "Barley", "Growing of cassava" = "Cassava",
                         "Growing of coconuts" =  "Coconuts" , "Growing of raw cotton" = "Cottonseed", "Growing of groundnuts" = "Groundnuts, with shell",
                         "Growing of grain maize" =  "Maize","Growing of millet" =  "Millet","Growing of oil palm fruit" =  "Oil palm fruit",
-                        "Growing of other oilseeds" = "Oilseeds", "Growing of paddy rice" = "Rice, paddy", "Growing of potatoes" = "Potatoes",
+                        "Growing of paddy rice" = "Rice, paddy", "Growing of potatoes" = "Potatoes",
                         "Growing of rape and mustardseed" = "Rapeseed", #note this assumes mustardseed production is negligible compared to rapeseed (or kcal/ton of both are similar). This is reasonable given that in 2021 global rapeseed production was ~71 million vs. ~0.5 million for mustardseed
                         "Growing of sesame seed" ="Sesame seed", "Growing of sorghum" = "Sorghum", "Growing of sugar beet" =  "Sugar beet",
                         "Growing of sugar cane" =  "Sugar cane", "Growing of sunflower seed" =  "Sunflower seed", "Growing of wheat" = "Wheat",
                         "Growing of olives" =  "Olives", "Growing of plantains" =  "Plantains and others", "Growing of soybeans" = "Soybeans",
                         "Growing of sweet potato and yams" = "Sweet Potato and Yams",
                         "Growing of other vegetables" = "Other vegetables", "Growing of dried pulses" = "Dried pulses", 
-                        "Growing of other fruits" = "Other fruit", "Growing of other cereals" = "Other cereals")
+                        "Growing of other fruits" = "Other fruit", "Growing of other cereals" = "Other cereals", "Growing of other oilseeds" = "Other oilseeds")
 
 #join kcal/ton to primary dataframe
 d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
