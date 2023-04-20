@@ -5,27 +5,23 @@ library(tidyr)
 library(reshape2)
 
 # Load Data ---------------------------------------------------------------
-d <- read_csv("../raw_data/FOFA2050CountryData_Crop-production.csv") #Import FOFA 2050 data
+d <- read_csv("raw_data/FOFA2050CountryData_Crop-production.csv") #Import FOFA 2050 data
 
-d <- d %>% 
+d <- d %>% #filter data to arable land, harvested area, yield and cropping intensity for 2012 and 2050 (projected) only
   filter(Scenario == "Business As Usual", Year %in% c(2012, 2050), !Indicator %in% c("Climate shifter", "Technology shifter")) %>% 
   select(-c(Domain, CountryCode, Region, Units, Scenario)) %>% 
   pivot_wider(names_from = Indicator,values_from = Value) %>% #create column for each variable
- # rename(a = `Arable land`, h = `Harvested area`, c = `Cropping intensity`, y = `Crop yield`) %>% #rename function not working now, so used original names.
-  # mutate(h = 1000*h) %>% #convert h from 1000 ha to ha
- # mutate(p = h*y) %>%  #calculate production in tonnes
-  mutate(`Harvested area` = 1000*`Harvested area`) %>% 
-  mutate(p = `Harvested area`*`Crop yield`) %>% 
-  pivot_wider(names_from = Year, values_from = c(`Arable land`, `Harvested area`, `Cropping intensity`, `Crop yield`, p)) #pivot to create column for each variable-year combination
-
-colnames(d) <- c("Item", "Element", "CountryName", "a_2012", "a_2050", "h_2012", "h_2050", "c_2012", "c_2050", "y_2012", "y_2050", "p_2012", "p_2050")
-#a: hectares; h: hectares, c: harvests/year, y: tonnes/ha, p: tonnes
+  rename(a = `Arable land`, h = `Harvested area`, c = `Cropping intensity`, y = `Crop yield`) %>% 
+  mutate(h = 1000*h) %>% #convert h from 1000 ha to ha
+  mutate(p = h*y) %>%  #calculate production in tonnes
+  pivot_wider(names_from = Year, values_from = c(a, h, c, y, p)) #pivot to create column for each variable-year combination 
+  #units:  a: hectares; h: hectares, c: harvests/year, y: tonnes/ha, p: tonnes
 
 # Calculate baseline, projected and high harvested area, arable, LUC --------
 d <- d %>%  
-  mutate(b_h = p_2050/y_2012,     #baseline harvested area = 2050 production/2012 yield
-         p_h = p_2050/y_2050,     #projected harvested area = 2050 production/2050 yield. equivalent to h_2050, harvested area as projected by FOFA
-         h_h = a_2012 * c_2050, #high harvested area = 2012 arable area, harvested with 2050 cropping intensity
+  mutate(b_h = p_2050/y_2012,     #baseline harvested area = 2050 production/2012 yield = (2050 harvested area * 2050 yield) / 2012 yield
+         p_h = p_2050/y_2050,     #projected harvested area = 2050 production/2050 yield = 2050 harvested area * (2050 yield/2050 yield) = 2050 harvested area
+         h_h = a_2012 * c_2050, #high harvested area = 2012 arable area, harvested with 2050 cropping intensity = (2012 harvested area/2012 cropping intensity)*2050 cropping intensity 
          
          b_a = b_h/c_2012,   #baseline arable land = baseline harvested area/2012 cropping intensity
          p_a = p_h/c_2050,   #projected arable land = projected harvested area/2050 cropping intensity
@@ -39,39 +35,48 @@ d <- d %>%
          p_l = p_a - a_2012,
          h_l = h_a  - a_2012)
 
-#t <- d %>% group_by(Item) %>% summarize(og = sum(h_h), new = sum(h_h2))
 
-# # Convert from tons to kcal -----------------------------------------------
-# #Convert FOFA crop names for kcal conversion for each scenario
-# kcal_per_ton_by_crop <- read_csv("Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/raw_data/cal_per_tonne_by_crop.csv")
-# kcal_per_ton_by_crop <- cal_per_tonne_by_crop
-# 
-# #Combine kcal conversions for sweet potato and yams
-# yam <- filter(kcal_per_ton_by_crop, crop == "Yams")
-# swp <- filter(kcal_per_ton_by_crop, crop == "Sweet potatoes")
-# swp_yam <- (yam$kcal_per_tonne + swp$kcal_per_tonne)/2 #calculate average kcal/ton for sweet potato and yam
-# swp_yam <- c("Sweet Potato and Yams", swp_yam)
-# kcal_per_ton_by_crop <- rbind(kcal_per_ton_by_crop,swp_yam)  #add to dataframe of kcal conversions
-# rm(yam, swp, swp_yam) #clean environment
-# kcal_per_ton_by_crop$kcal_per_tonne <- as.numeric(kcal_per_ton_by_crop$kcal_per_tonne)
-# 
-# #rename items that we we filter to
-# d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of barley" = "Barley", "Growing of cassava" = "Cassava", 
-#                         "Growing of coconuts" =  "Coconuts" , "Growing of groundnuts" = "Groundnuts, with shell", 
-#                         "Growing of grain maize" =  "Maize","Growing of millet" =  "Millet","Growing of oil palm fruit" =  "Oil palm fruit", 
-#                         "Growing of other oilseeds" = "Oilseeds", "Growing of paddy rice" = "Rice, paddy", "Growing of potatoes" = "Potatoes",
-#                         "Growing of sesame seed" ="Sesame seed", "Growing of sorghum" = "Sorghum", "Growing of sugar beet" =  "Sugar beet",
-#                         "Growing of sugar cane" =  "Sugar cane", "Growing of sunflower seed" =  "Sunflower seed", "Growing of wheat" = "Wheat", 
-#                         "Growing of olives" =  "Olives", "Growing of plantains" =  "Plantains and others", "Growing of soybeans" = "Soybeans", 
-#                         "Growing of sweet potato and yams" = "Sweet Potato and Yams")
-# 
-# #join kcal/ton to primary dataframe  
-# d <- inner_join(d, kcal_per_ton_by_crop, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
-# fofa_crops_not_joined <- unique(anti_join(d, kcal_per_ton_by_crop, by = c("Item" = "crop"))$Item) #crops from FOFA with no kcal match
-# conversion_crops_not_joined <- unique(anti_join(kcal_per_ton_by_crop, d, by = c("crop" = "Item"))$crop) #crops from  kcal with no FOFA match 
-# 
-# #multiply all production columns by kcal/ton
-# d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
+# Convert from tons to kcal -----------------------------------------------
+#Convert FOFA crop names for kcal conversion for each scenario
+kcal <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
+
+#Combine kcal conversions for sweet potato and yams since FOFA dataset only includes cvalues for combined sweet potato + yams
+yam <- filter(kcal, crop == "Yams")
+swp <- filter(kcal, crop == "Sweet potatoes")
+swp_yam <- c("Sweet Potato and Yams", as.numeric((yam$kcal_per_tonne + swp$kcal_per_tonne)/2)) #calculate average kcal/ton for sweet potato and yam
+kcal <- rbind(kcal,swp_yam)  #add to dataframe of kcal conversions
+rm(yam, swp, swp_yam) #clean environment
+kcal$kcal_per_tonne <- as.numeric(kcal$kcal_per_tonne)
+
+#Combine kcal conversions for pulses ( dry beans, dry broad beans, dry peas, chickpeas, cow peas, pigeon peas, lentils, Bambara beans, vetches, lupins) since FOFA dataset only includes values for "dried pulses"
+dried_pulses <- tibble("Dried pulses", mean(kcal[c(which(kcal$crop %in% c("Bambara beans", "Beans, dry", "Broad beans, horse beans, dry", "Chick peas", "Lentils", "Cow peas, dry", "Peas, dry", "Pigeon peas", "Lupins", "Vetches"))), 2]$kcal_per_tonne))
+kcal <- rbind(kcal,dried_pulses)  #add to dataframe of kcal conversions
+rm(dried_pulses) #clean environment
+
+#Combine kcal conversions for other vegetables
+#Combine kcal conversions for other fruits
+#Combine kcal conversions for  other cereals, 
+#Combine kcal conversions for other oilseeds
+#Combine kcal conversions for other roots and tubers
+
+#rename items that we we filter to. NOTE that cotton could be include or excluded based on analyst's choice.
+d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of barley" = "Barley", "Growing of cassava" = "Cassava",
+                        "Growing of coconuts" =  "Coconuts" , "Growing of raw cotton" = "Cottonseed", "Growing of groundnuts" = "Groundnuts, with shell",
+                        "Growing of grain maize" =  "Maize","Growing of millet" =  "Millet","Growing of oil palm fruit" =  "Oil palm fruit",
+                        "Growing of other oilseeds" = "Oilseeds", "Growing of paddy rice" = "Rice, paddy", "Growing of potatoes" = "Potatoes",
+                        "Growing of rape and mustardseed" = "Rapeseed", #note this assumes mustardseed production is negligible compared to rapeseed (or kcal/ton of both are similar). This is reasonable given that in 2021 global rapeseed production was ~71 million vs. ~0.5 million for mustardseed
+                        "Growing of sesame seed" ="Sesame seed", "Growing of sorghum" = "Sorghum", "Growing of sugar beet" =  "Sugar beet",
+                        "Growing of sugar cane" =  "Sugar cane", "Growing of sunflower seed" =  "Sunflower seed", "Growing of wheat" = "Wheat",
+                        "Growing of olives" =  "Olives", "Growing of plantains" =  "Plantains and others", "Growing of soybeans" = "Soybeans",
+                        "Growing of sweet potato and yams" = "Sweet Potato and Yams")
+
+#join kcal/ton to primary dataframe
+d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
+fofa_crops_not_joined <- unique(anti_join(d, kcal, by = c("Item" = "crop"))$Item) #crops from FOFA with no kcal match
+conversion_crops_not_joined <- unique(anti_join(kcal, d, by = c("crop" = "Item"))$crop) #crops from  kcal with no FOFA match
+
+#multiply all production columns by kcal/ton
+d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
 
 # Aggregate by region -----------------------------------------------------
 #Define regions
