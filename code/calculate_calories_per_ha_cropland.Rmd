@@ -17,7 +17,9 @@ prod <- read_csv("../raw_data/faostat/production_all_crops.csv") %>% select(coun
 
 cal_conversions <- read_csv("../raw_data/cal_per_tonne_by_crop.csv")
 
-cropland <- read_csv("../raw_data/faostat/cropland.csv") %>% select(-Domain, -Element, -Item, cropland = Value, country = Area, year = Year) #units for cropland are in ha
+cropland <- read_csv("../raw_data/faostat/cropland.csv") %>% 
+  select(-Domain, -Element, -Item, cropland = Value, country = Area, year = Year) %>% 
+  mutate(cropland = cropland * 1000) #original units for cropland are in 1000 ha. We convert to ha
 ``` 
 
 ```{r Check if crop types in cal_conversions match those in FAOSTAT_production_all_crops and replace non-matching crop names }
