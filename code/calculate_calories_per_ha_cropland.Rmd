@@ -85,4 +85,5 @@ ylds <- ylds %>% mutate(kcal_ha = tot_kcal/cropland)
 
 ```{r Save}
 write_csv(ylds, "../int_data/prod.cropland.csv")
+rm(list = ls())
 ```
