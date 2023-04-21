@@ -10,86 +10,66 @@ library(zoo)
 library(sandwich)
 library(plm)
 library(lmtest)
-library(data.table)
-library(plotly)
 library(jtools) 
 library(ggstance)
-library(ggplot2)
-library(dplyr)
-library(tidyr)
 library(tidyverse)
 library(janitor)
-library(plotly)
 library(reshape2)
 library(naniar)
 library(reshape)
 library(wesanderson)
-library(stringr)
-library(ggplot2)
 ```
 
 ```{r Read in Data}
 #Inputs data
-reg_dat <- read_csv("~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/raw_data/FAOSTAT_Regression_Dat_allyears.csv")
+pest_fuel_use_fert_emis <- read_csv("raw_data/faostat/pesticide_and_fuel_use_and_fertilizer_emissions.csv")
 #FAOSTAT data is in long format, contains data on all countries and years on synthetic fertilizer emissons (Gg), pesticide application (tons) and energy use emissions (Gg)
 
-syn_N_use <- read_csv("~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/raw_data/FAOSTAT_synN_USE.csv")
+syn_N_use <-read_csv("raw_data/faostat/fertilizer_use.csv")
 #FAOSTAT data is in long format, contains info on all countries and years on synthetic fertilizer application (kg)
 
 syn_N_use[syn_N_use == 0] <- NA #0's are likely missing data
 colnames(syn_N_use) <- c("Country", "Year", "Syn_N_use")
 
 #Yield and Cropland Data from calculate_calories_per_cropland.Rmd
-dat1 <- read_csv(file = "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/prod.cropland.csv")
+prod <- read_csv("int_data/prod.cropland.csv")
 
-#load data on dan machine
-# setwd("/System/Volumes/Data/Volumes/GoogleDrive/My Drive/BTI Research/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis")
-# reg_dat <- read_csv("raw_data/FAOSTAT_Regression_Dat_allyears.csv")
-# syn_N_use <- read_csv("raw_data/FAOSTAT_synN_USE.csv")
-# syn_N_use[syn_N_use == 0] <- NA #0's are likely missing data
-# colnames(syn_N_use) <- c("Country", "Year", "Syn_N_use")
-# dat1 <- read_csv(file = "clean_data/prod.cropland.csv") 
-
-Yield <- dat1[, c(1,2,5)]
-Cropland <- dat1[, c(1,2,4)]
-Production <- dat1[,c(1,2,3)]
+Yield <- prod[, c(1,2,5)]
+Cropland <- prod[, c(1,2,4)]
+Production <- prod[,c(1,2,3)]
 ```
 
 
 ```{r Calculate total fuel emissions, calculate emissions per ha for each input }
 #join dataframes on input use, production, and cropland
-reg_temp <- spread(reg_dat, key = Item, value = Value) #convert data to wide format 
-reg_temp_a <- reg_temp
-reg_temp <- merge(reg_temp,Production, by = c("Country", "Year")) 
-reg <- merge(reg_temp, Cropland)
-reg <- merge(reg, syn_N_use)
+reg <- spread(pest_fuel_use_fert_emis, key = Item, value = Value) #convert data to wide format 
+reg <- inner_join(reg, prod, by = c("Country" = "country", "Year" = "year")) %>% inner_join(syn_N_use) 
 
 #Determine number of negative and 0 values for inputs
 dat <- reg
-nrow(dat[dat$`Energy used in fishery`<= 0, ]) #7955 obs
-nrow(dat[dat$`Nutrient nitrogen N (total)` <= 0, ]) #7228 obs
-nrow(dat[dat$`Pesticides (total)` <= 0, ]) #5611 obs
-nrow(dat[dat$`Synthetic Nitrogen fertilizers` <= 0, ]) #1674 obs, different from Dan's number of 1002
-nrow(dat[dat$`Total Energy` <= 0, ]) #5459 obs, different from Dan's number of 168
-nrow(dat[dat$`Transport fuel used in agriculture (excl. fishery)` <= 0, ]) #6654
-nrow(dat[dat$Syn_N_use <= 0, ]) #1019
+nrow(reg[reg$`Energy used in fishery`<= 0, ]) #7955 obs
+nrow(reg[reg$`Nutrient nitrogen N (total)` <= 0, ]) #7228 obs
+nrow(reg[reg$`Pesticides (total)` <= 0, ]) #5611 obs
+nrow(reg[reg$`Synthetic Nitrogen fertilizers` <= 0, ]) #1674 obs, different from Dan's number of 1002
+nrow(reg[reg$`Total Energy` <= 0, ]) #5459 obs, different from Dan's number of 168
+nrow(reg[reg$`Transport fuel used in agriculture (excl. fishery)` <= 0, ]) #6654
+nrow(reg[reg$Syn_N_use <= 0, ]) #1019
 
 #Replace negative and 0 values with NA
-dat[dat <= 0] <- NA #change to less than or equal to remove negative values for transportation fuel
+reg[reg <= 0] <- NA #change to less than or equal to remove negative values for transportation fuel
 
 
-#Fill in missing data for each column by country. Apply the last one carried forward method to each column in the dataframe (called dat below), grouping by country so that if the first observation is NA, the function doesn't replace with observation from different country. Will not fill in data for previous years.
-dat <-  dat %>% group_by(Country) %>% mutate(`Energy used in fishery` = na.locf(`Energy used in fishery`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Nutrient nitrogen N (total)` = na.locf(`Nutrient nitrogen N (total)`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Pesticides (total)` = na.locf(`Pesticides (total)`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Synthetic Nitrogen fertilizers` = na.locf(`Synthetic Nitrogen fertilizers`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Total Energy` = na.locf(`Total Energy`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Transport fuel used in agriculture (excl. fishery)` = na.locf(`Transport fuel used in agriculture (excl. fishery)`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Production (kcal)` = na.locf(`Production (kcal)`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(`Cropland (ha)` = na.locf(`Cropland (ha)`, na.rm = FALSE))
-dat <-  dat %>% group_by(Country) %>% mutate(Syn_N_use = na.locf(Syn_N_use, na.rm = FALSE))
+#Fill in missing data for each column by country. Apply the last one carried forward method to each column in the dataframe (called reg below), grouping by country so that if the first observation is NA, the function doesn't replace with observation from different country. Will not fill in data for previous years.
+reg <-  reg %>% group_by(Country) %>% mutate(`Energy used in fishery` = na.locf(`Energy used in fishery`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Nutrient nitrogen N (total)` = na.locf(`Nutrient nitrogen N (total)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Pesticides (total)` = na.locf(`Pesticides (total)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Synthetic Nitrogen fertilizers` = na.locf(`Synthetic Nitrogen fertilizers`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Total Energy` = na.locf(`Total Energy`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Transport fuel used in agriculture (excl. fishery)` = na.locf(`Transport fuel used in agriculture (excl. fishery)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Production (kcal)` = na.locf(`Production (kcal)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(`Cropland (ha)` = na.locf(`Cropland (ha)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(Syn_N_use = na.locf(Syn_N_use, na.rm = FALSE))
 
-reg <- dat
 
 #Add a column called "val" which replaces the NAs with 0s to calculate fuel emissions without changing the NA data for the Total Energy, Energy Used in Fishery, and Transport fuel columns
 
