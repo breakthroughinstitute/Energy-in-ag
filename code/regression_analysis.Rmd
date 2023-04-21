@@ -46,14 +46,13 @@ reg <- spread(pest_fuel_use_fert_emis, key = Item, value = Value) #convert data 
 reg <- inner_join(reg, prod, by = c("Country" = "country", "Year" = "year")) %>% inner_join(syn_N_use) 
 
 #Determine number of negative and 0 values for inputs
-dat <- reg
-nrow(reg[reg$`Energy used in fishery`<= 0, ]) #7955 obs
-nrow(reg[reg$`Nutrient nitrogen N (total)` <= 0, ]) #7228 obs
-nrow(reg[reg$`Pesticides (total)` <= 0, ]) #5611 obs
-nrow(reg[reg$`Synthetic Nitrogen fertilizers` <= 0, ]) #1674 obs, different from Dan's number of 1002
-nrow(reg[reg$`Total Energy` <= 0, ]) #5459 obs, different from Dan's number of 168
-nrow(reg[reg$`Transport fuel used in agriculture (excl. fishery)` <= 0, ]) #6654
-nrow(reg[reg$Syn_N_use <= 0, ]) #1019
+nrow(reg[reg$`Energy used in fishery`<= 0, ]) 
+nrow(reg[reg$`Nutrient nitrogen N (total)` <= 0, ]) 
+nrow(reg[reg$`Pesticides (total)` <= 0, ]) 
+nrow(reg[reg$`Synthetic Nitrogen fertilizers` <= 0, ]) 
+nrow(reg[reg$`Total Energy` <= 0, ]) 
+nrow(reg[reg$`Transport fuel used in agriculture (excl. fishery)` <= 0, ])
+nrow(reg[reg$Syn_N_use <= 0, ])
 
 #Replace negative and 0 values with NA
 reg[reg <= 0] <- NA #change to less than or equal to remove negative values for transportation fuel
@@ -66,57 +65,25 @@ reg <-  reg %>% group_by(Country) %>% mutate(`Pesticides (total)` = na.locf(`Pes
 reg <-  reg %>% group_by(Country) %>% mutate(`Synthetic Nitrogen fertilizers` = na.locf(`Synthetic Nitrogen fertilizers`, na.rm = FALSE))
 reg <-  reg %>% group_by(Country) %>% mutate(`Total Energy` = na.locf(`Total Energy`, na.rm = FALSE))
 reg <-  reg %>% group_by(Country) %>% mutate(`Transport fuel used in agriculture (excl. fishery)` = na.locf(`Transport fuel used in agriculture (excl. fishery)`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Production (kcal)` = na.locf(`Production (kcal)`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Cropland (ha)` = na.locf(`Cropland (ha)`, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(tot_kcal = na.locf(tot_kcal, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(cropland = na.locf(cropland, na.rm = FALSE))
+reg <-  reg %>% group_by(Country) %>% mutate(kcal_ha = na.locf(kcal_ha, na.rm = FALSE))
 reg <-  reg %>% group_by(Country) %>% mutate(Syn_N_use = na.locf(Syn_N_use, na.rm = FALSE))
 
-
-#Add a column called "val" which replaces the NAs with 0s to calculate fuel emissions without changing the NA data for the Total Energy, Energy Used in Fishery, and Transport fuel columns
-
-for (i in 1:nrow(reg)) {
-    val <-  reg$`Energy used in fishery`[i] 
-    if (is.na(val) == "TRUE") {
-       reg$val_EF[i]  <- 0
-    } else {
-      reg$val_EF[i]  <- val 
-    }
-}
-for (i in 1:nrow(reg)) {
-    val <-  reg$`Total Energy`[i] 
-    if (is.na(val) == "TRUE") {
-       reg$val_totE[i]  <- 0
-    } else {
-      reg$val_totE[i]  <- val 
-    }
-}
-for (i in 1:nrow(reg)) {
-    val <-  reg$`Transport fuel used in agriculture (excl. fishery)`[i] 
-    if (is.na(val) == "TRUE") {
-       reg$val_trans[i]  <- 0
-    } else {
-     reg$val_trans[i]  <- val 
-    }
-}  
-
-#Calculate total fuel applied from on farm sources, subtract emissions from fisheries and transportation  
-reg$Fuel.emissions <- reg$val_totE -  reg$val_EF -  reg$val_trans 
-
-#Remove the val_EF, val_totE, and val_trans cols
-reg$val_EF <- NULL
-reg$val_totE <- NULL
-reg$val_trans <- NULL
+#Calculate total fuel applied from on farm sources, subtract emissions from fisheries and transportation, ignoring NAs in fisheries and transportation but not in total energy
+reg$Fuel.emissions <- ifelse(!is.na(reg$`Total Energy`), reg$`Total Energy` - rowSums(reg[,c("Energy used in fishery","Transport fuel used in agriculture (excl. fishery)")], na.rm=TRUE), NA)
 
 #Cropland units are per 1000 ha, so multiply cropland values by 1000
-reg$`Cropland (ha)` <- reg$`Cropland (ha)` * 1000 
+reg$cropland <- reg$cropland * 1000 
 
 #Calculate each emissions or input use per ha 
-reg$Fuel_ha <-reg$Fuel.emissions/reg$`Cropland (ha)` #units are gigagrams/ha
-reg$P_ha <- reg$`Pesticides (total)`/reg$`Cropland (ha)` #units are tons applied/ha
-reg$synN_use_ha <- reg$Syn_N_use/reg$`Cropland (ha)` #units are kg applied/ha       
-reg$SynN_ha <- reg$`Synthetic Nitrogen fertilizers`/reg$`Cropland (ha)`#units are gigagrams/ha
+reg$Fuel_ha <-reg$Fuel.emissions/reg$cropland #units are gigagrams/ha
+reg$P_ha <- reg$`Pesticides (total)`/reg$cropland #units are tons applied/ha
+reg$synN_use_ha <- reg$Syn_N_use/reg$cropland #units are kg applied/ha       
+reg$SynN_ha <- reg$`Synthetic Nitrogen fertilizers`/reg$cropland#units are gigagrams/ha
 
 #reg calc yield
-reg$yield <-  reg$`Production (kcal)`/reg$`Cropland (ha)`
+reg$yield <-  reg$`tot_kcal`/reg$cropland
 plot(reg$yield, reg$SynN_ha, main = "Yield vs. Syn N emissions per ha")
 plot(reg$yield, reg$synN_use_ha, main = "Yield vs. Syn N yse per ha (manufacturing)")
 plot(reg$yield, reg$Fuel_ha, main = "Yield vs. On farm fuel emissions per ha")
