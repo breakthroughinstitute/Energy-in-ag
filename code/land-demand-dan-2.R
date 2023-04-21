@@ -125,36 +125,33 @@ d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign r
                   Africa = case_when(CountryName %in% Africa ~ "Africa"))
 
 #select only columns for scenarios
-#d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) 
+scenario_d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>% filter(is.na(Africa)==F)
 
-#create columns for each variable, but not each scenario
-##make dataframe long, then spread variable names
-#d <- d %>% pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>% 
- # pivot_wider(names_from = var, values_from = val)
+#create columns for each variable, but not each scenario. make dataframe long, then spread variable names
+scenario_d <- scenario_d %>% pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>%
+  pivot_wider(names_from = var, values_from = val)
 
+#summarize each variable by Africa region and scenario
+regions_scenario <- scenario_d %>% group_by(region, scenario) %>%
+  summarize(harv_area = sum(h, na.rm=T),
+            yield = sum(p, na.rm=T)/sum(h, na.rm=T), #calculate yield as total production (in kcal) per harvested area (ha)
+            luc = sum(l, na.rm=T),
+            arable_area = sum(a, na.rm=T),
+            production = sum(p, na.rm=T)) #should be same for every scenario
 
+#summarize each variable across Africa by scenario
+Africa_scenario <- scenario_d %>% group_by(Africa, scenario) %>%
+  summarize(harv_area = sum(h, na.rm=T),
+            yield = sum(p, na.rm=T)/sum(h, na.rm=T), #calculate yield as total production (in kcal) per harvested area (ha)
+            luc = sum(l, na.rm=T),
+            arable_area = sum(a, na.rm=T),
+            production = sum(p, na.rm=T)) %>% #should be same for every scenario
+  rename(region = Africa)
 
-# #summarize each variable by region and scenario
-# regions_scenario <- d %>% group_by(region, scenario) %>% 
-#   summarize(harv_area = sum(h, na.rm=T),
-#             yield = sum(p, na.rm=T)/sum(h, na.rm=T),
-#             luc = sum(l, na.rm=T),
-#             arable_area = sum(a, na.rm=T),
-#             production = sum(p, na.rm=T)) #should be same for every scenario
-# 
-# #summarize each variable across Africa by scenario
-# Africa_scenario <- d %>% group_by(Africa, scenario) %>% 
-#   summarize(harv_area = sum(h, na.rm=T),
-#             yield = sum(p, na.rm=T)/sum(h, na.rm=T),
-#             luc = sum(l, na.rm=T),
-#             arable_area = sum(a, na.rm=T),
-#             production = sum(p, na.rm=T)) %>% #should be same for every scenario  
-#   rename(region = Africa)
-# 
-# regions_scenario <- rbind(regions_scenario, Africa_scenario) %>% filter(is.na(region)==F)
+regions_scenario <- rbind(regions_scenario, Africa_scenario)
 
 #save Scenarios' (yield, harvested area, and production) data
-#write.csv(regions_scenario,"LandDemand/regions_scenario_dan.csv")
+write_csv(regions_scenario,"int_data/scenarios.csv")
 
 # Calculate avg CO2 loss by crop & country --------------------------------
 

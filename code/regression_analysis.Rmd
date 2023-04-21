@@ -523,13 +523,12 @@ syn_n_use.ols <- lm(filter_syn_n_use_reg, formula = log(syn_n_use_ha) ~ log(yiel
 
 ```{r Import yields for each scenario and region to estumate input use and emissions}
 
-regions_scenario <- read_csv("~/Google Drive/My Drive/Food & Farming/Energy in ag/LandDemand/regions_scenario_dan2.csv") #yields are in kcal/ha
-regions_scenario <- regions_scenario_dan2
-#Convert country names in regions_scenario to East, West, Central, South, North
-regions_scenario$region <- recode(regions_scenario$region, E_Afr = "East", C_Afr = "Central", S_Afr = "South", N_Afr = "North", W_Afr = "West")
-#regions_scenario$...1 <- NULL
+scenarios <- read_csv("int_data/scenarios.csv") #yields are in kcal/ha
+#Convert country names in scenarios to East, West, Central, South, North
+scenarios$region <- recode(scenarios$region, E_Afr = "East", C_Afr = "Central", S_Afr = "South", N_Afr = "North", W_Afr = "West")
+#scenarios$...1 <- NULL
 
-b <- filter(regions_scenario, scenario == "b")
+b <- filter(scenarios, scenario == "b")
 b_e <- b %>% filter(region=="East") %>% select(yield, country = region)
 b_w <- b %>% filter(region=="West") %>% select(yield, country = region)
 b_s <- b %>% filter(region=="South") %>% select(yield, country = region)
@@ -537,7 +536,7 @@ b_c <- b %>% filter(region=="Central") %>% select(yield, country = region)
 b_n <- b %>% filter(region=="North") %>% select(yield, country = region)
 b_a <- b %>% filter(region=="Africa") %>% select(yield, country = region)
 
-p <- filter(regions_scenario, scenario == "p")
+p <- filter(scenarios, scenario == "p")
 p_e <- p %>% filter(region=="East") %>% select(yield, country = region)
 p_w <- p %>% filter(region=="West") %>% select(yield, country = region)
 p_s <- p %>% filter(region=="South") %>% select(yield, country = region)
@@ -545,7 +544,7 @@ p_c <- p %>% filter(region=="Central") %>% select(yield, country = region)
 p_n <- p %>% filter(region=="North") %>% select(yield, country = region)
 p_a <- p %>% filter(region=="Africa") %>% select(yield, country = region)
 
-h_alt <- filter(regions_scenario, scenario == "h")
+h_alt <- filter(scenarios, scenario == "h")
 h_alt_e <- h_alt %>% filter(region=="East") %>% select(yield, country = region)
 h_alt_w <- h_alt %>% filter(region=="West") %>% select(yield, country = region)
 h_alt_s <- h_alt %>% filter(region=="South") %>% select(yield, country = region)
@@ -987,10 +986,10 @@ rownames(p_app) <- NULL
 ```
 
 ```{r Calculate emissions for each input source, region, and scenario}
-area_b <- regions_scenario %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "b")
-area_p <- regions_scenario %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "p")
-#area_h <- regions_scenario %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "high")
-area_h_alt <- regions_scenario %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "h")
+area_b <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "b")
+area_p <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "p")
+#area_h <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "high")
+area_h_alt <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "h")
 
 #Conversion factors for fertilizer and pesticides manufacturing emissions
 fert_ef <- 5.66 #5.66 kg CO2 eq/kg product  is the fertilizer EF
