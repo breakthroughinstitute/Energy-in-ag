@@ -101,32 +101,28 @@ rm(citrus, kcal, cereals, cit, fruit, oilseeds, pulses, roots, swp, veg, dried_p
 #Define regions
 
 #Member countries within each region are from the UN Statistics division : https://unstats.un.org/unsd/methodology/m49/overview/
-#Member Countres within each region are from UN-NEPAD Africa Ag report : https://www.un.org/en/africa/osaa/pdf/pubs/2013africanagricultures.pdf
+country_groupings <- readxl::read_excel("raw_data/UNSD — Methodology.xlsx")
 
-Africa <- c( "Algeria","Angola", "Benin", "Botswana", "Burkina Faso", "Cameroon", "Chad", "Central African Republic", 
-             "Comoros", "Côte d'Ivoire",  "Egypt", "Ethiopia",  "Gabon", "Gambia, The", "Gambia", "Ghana", "Guinea" , "Kenya" ,
-             "Lesotho" , "Liberia","Madagascar" , "Malawi" , "Mali", "Mauritania" , "Mauritius",  "Mozambique",  
-             "Namibia" , "Niger", "Nigeria", "Republic of Congo" , "Rwanda", "Rest of SSA",  "Senegal",  "Sierra Leone", 
-             "Somalia", "South Africa", "Sudan" ,"Sudan (former)", "Swaziland", "Togo" , "Uganda",  
-             "Tanzania, United Republic of",  "Zambia" , "Zimbabwe", "Tunisia", "Morocco", "United Republic of Tanzania",
-             "Congo", "Ivory Coast", "Burundi", "Republic of the Congo","Libya")
+Africa <- country_groupings %>% filter(`Region Name`=="Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+W_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Western Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+E_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Eastern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+C_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Middle Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+S_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Southern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+N_Afr <- country_groupings %>% filter(`Sub-region Name`=="Northern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
 
-# W_Afr <- c("Benin","Burkina Faso","Côte d'Ivoire","Ivory Coast", "Cabo Verde", "Cape Verde", "Ghana", "Guinea", "Liberia", "Mali", 
-#            "Niger", "Nigeria", "Senegal" ,"Sierra Leone",   "Gambia", "Togo")
-# #Guinea-Bissau, Saint Helena, Western Sahara in FOFA. What FOFA calls Cape Verde, is Cabo Verde in FAOSTAT. 
-# 
-# E_Afr <- c("Ethiopia", "Ethiopia PDR", "Kenya" ,  "Madagascar" , "Mauritius","Rwanda", "Somalia", "United Republic of Tanzania", "Tanzania, United Republic of", "Tanzania", "Uganda")
-# #Djibouti, South Sudan, Eritrea, Comoros, Reunion, Réunion, Mayotte, Seychelles not in FOFA
-# 
-# C_Afr <- c("Burundi","Chad",  "Central African Republic", "Gabon","Democratic Republic of the Congo", "Republic of Congo", "Republic of the Congo", "Congo", "Cameroon")
-# #FOFA does not have Sao Tome and Principe, Congo, Guinea-Bissau, or Equatorial Guinea. FOFA has "Republic of the Congo" whose equivalent in FAOSTAT is "Democratic Republic of the Congo"
-# 
-# S_Afr <-c("Angola","Botswana", "Eswatini", "Swaziland",  "Lesotho", "Namibia", "South Africa", "Mozambique", "Malawi", "Zambia", "Zimbabwe" ) 
-# #FOFA uses old name for Eswatini which is Swaziland, but FAOSTAT uses Eswatini 
-# 
-# N_Afr <-c("Algeria", "Egypt", "Morocco", "Tunisia","Mauritania", "Libya")
-#No Western Sahara or Sudan(former) in FOFA, no Libya
+#define countries in Africa without matching names in FOFA in order to make names consistent for joining
+Africa[which(!Africa %in% unique(d$CountryName))]
 
+#match all possible, based on manual examination of FOFA countries. Most non-matching ones aren't listed separately in FOFA
+d$CountryName <- recode(d$CountryName, "Republic of the Congo" = "Congo", "Côte d'Ivoire"="Côte d’Ivoire", "Swaziland" = "Eswatini")
+
+#add column for region
+d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign region name if country is in the list of countries for that region
+                                     CountryName %in% E_Afr ~ "E_Afr",
+                                     CountryName %in% C_Afr ~ "C_Afr",
+                                     CountryName %in% S_Afr ~ "S_Afr",
+                                     CountryName %in% N_Afr ~ "N_Afr"),
+                  Africa = case_when(CountryName %in% Africa ~ "Africa"))
 
 #select only columns for scenarios
 #d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) 
@@ -136,14 +132,7 @@ Africa <- c( "Algeria","Angola", "Benin", "Botswana", "Burkina Faso", "Cameroon"
 #d <- d %>% pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>% 
  # pivot_wider(names_from = var, values_from = val)
 
-#add column for region
-#d <- d %>% 
- # mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign region name if country is in the list of countries for that region
-                           # CountryName %in% E_Afr ~ "E_Afr",
-                           # CountryName %in% C_Afr ~ "C_Afr",
-                           # CountryName %in% S_Afr ~ "S_Afr",
-                           # CountryName %in% N_Afr ~ "N_Afr"),
-       #  Africa = case_when(CountryName %in% Africa ~ "Africa"))
+
 
 # #summarize each variable by region and scenario
 # regions_scenario <- d %>% group_by(region, scenario) %>% 
