@@ -3,6 +3,8 @@ title: "Calculate Calories Produced per Hectare Cropland"
 output: html_notebook
 author: "Dan Rejto"
 date: "Apr 13, 23"
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r initialize}
