@@ -40,54 +40,33 @@ d <- d %>%
 #Convert FOFA crop names for kcal conversion for each scenario
 kcal <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
 
-#Combine kcal conversions for sweet potato and yams since FOFA dataset only includes cvalues for combined sweet potato + yams
-yam <- filter(kcal, crop == "Yams")
-swp <- filter(kcal, crop == "Sweet potatoes")
-swp_yam <- c("Sweet Potato and Yams", as.numeric((yam$kcal_per_tonne + swp$kcal_per_tonne)/2)) #calculate average kcal/ton for sweet potato and yam
-kcal <- rbind(kcal,swp_yam)  #add to dataframe of kcal conversions
-kcal$kcal_per_tonne <- as.numeric(kcal$kcal_per_tonne)
+#define crosswalk of crops in kcal data to crop groupings (e.g. citrus fruit) in FOFA. 
+swp <- c("Yams", "Sweet potatoes")
+pulses <- c("Bambara beans", "Beans, dry", "Broad beans, horse beans, dry", "Carobs", "Chick peas", "Lentils", "Cow peas, dry", "Peas, dry", "Pigeon peas", "Lupins", "Vetches")
+veg <- c("Artichokes", "Asparagus",  "Beans, green", "Cabbages and other brassicas", "Carrots and turnips", "Cauliflowers and broccoli", 
+  "Chillies and peppers, dry", "Chillies and peppers, green","Cucumbers and gherkins", "Eggplants (aubergines)", "Lettuce and chicory", 
+  "Okra","Onions, dry", "Onions, shallots, green", "Peas, green", "Pumpkins, squash and gourds", "Spinach", "String beans", "Tomatoes")
+cit <- c("Grapefruit (inc. pomelos)", "Lemons and limes", "Oranges","Tangerines, mandarins, clementines, satsumas")
+fruit <- c("Apples", "Apricots", "Avocados", "Blueberries", "Cashewapple", "Cherries", "Cranberries", "Currants", "Dates", "Figs", "Gooseberries",  "Grapes", "Kiwi fruit",  "Mangoes, mangosteens, guavas",  "Papayas", "Peaches and nectarines", 
+  "Pears", "Persimmons", "Pineapples", "Plums and sloes", "Quinces", "Raspberries", "Strawberries", "Watermelons")
+cereals <- c("Buckwheat", "Canary seed", "Fonio", "Grain, mixed", "Oats", "Quinoa", "Rye", "Triticale")
+oilseeds <- c("Hempseed", "Kapokseed in shell", "Karite nuts (sheanuts)", "Linseed", "Melonseed", "Poppy seed", "Safflower seed")
+roots <- c("Taro (cocoyam)", "Yautia (cocoyam)" )
 
-#Combine kcal conversions for pulses since FOFA dataset only includes values for "dried pulses"
-dried_pulses <- tibble(crop = "Dried pulses", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
-  "Bambara beans", "Beans, dry", "Broad beans, horse beans, dry", "Chick peas", "Lentils", "Cow peas, dry", 
-  "Peas, dry", "Pigeon peas", "Lupins", "Vetches"))), 2]$kcal_per_tonne))
-kcal <- rbind(kcal,dried_pulses)  #add to dataframe of kcal conversions
+#Calculate mean kcal per ton for FOFA groupings
+swp_yam <- tibble(crop = "Sweet Potato and Yams", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% swp)), 2]$kcal_per_tonne))
+dried_pulses <- tibble(crop = "Dried pulses", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% pulses)), 2]$kcal_per_tonne))
+other_veg <- tibble(crop = "Other vegetables", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% veg)), 2]$kcal_per_tonne))
+citrus <- tibble(crop = "Citrus fruits", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% cit)), 2]$kcal_per_tonne))
+other_fruit <- tibble(crop = "Other fruit", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% fruit)), 2]$kcal_per_tonne))
+other_cereals <- tibble(crop = "Other cereals", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% cereals)), 2]$kcal_per_tonne))
+other_oilseeds <- tibble(crop = "Other oilseeds", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% oilseeds)), 2]$kcal_per_tonne))
+other_roots <- tibble(crop = "Other roots", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% roots)), 2]$kcal_per_tonne))
 
-#Combine kcal conversions for other vegetables
-other_veg <- tibble(crop = "Other vegetables", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
-    "Artichokes", "Asparagus",  "Beans, green", "Cabbages and other brassicas", "Carrots and turnips", "Cauliflowers and broccoli", 
-    "Chillies and peppers, dry", "Chillies and peppers, green","Cucumbers and gherkins", "Eggplants (aubergines)", "Lettuce and chicory", 
-    "Okra","Onions, dry", "Onions, shallots, green", "Peas, green", "Pumpkins, squash and gourds", "Spinach", "String beans", "Tomatoes"
-    ))), 2]$kcal_per_tonne))
-kcal <- rbind(kcal,other_veg)  #add to dataframe of kcal conversions
+#add to dataframe of kcal conversions
+kcal <- bind_rows(kcal, swp_yam, dried_pulses, other_veg, citrus, other_fruit, other_cereals, other_oilseeds, other_roots)  
 
-#Combine kcal conversions for other fruits
-other_fruit <- tibble(crop = "Other fruit", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
-  "Apples", "Apricots", "Avocados", "Blueberries", "Cashewapple", "Cherries", "Cranberries", 
-  "Currants", "Dates", "Figs", "Gooseberries", "Grapefruit (inc. pomelos)", "Grapes", "Kiwi fruit",
-  "Lemons and limes", "Mangoes, mangosteens, guavas", "Oranges", "Papayas", "Peaches and nectarines", 
-  "Pears", "Persimmons", "Pineapples", "Plums and sloes", "Quinces", "Raspberries", "Strawberries", 
-  "Tangerines, mandarins, clementines, satsumas", "Watermelons"
-  ))), 2]$kcal_per_tonne))
-kcal <- rbind(kcal,other_fruit)  #add to dataframe of kcal conversions
-
-#Combine kcal conversions for  other cereals 
-other_cereals <- tibble(crop = "Other cereals", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
-  "Buckwheat", "Canary seed", "Fonio", "Grain, mixed", "Oats", "Quinoa", "Rye", "Triticale"
-  ))), 2]$kcal_per_tonne))
-kcal <- rbind(kcal,other_cereals)  #add to dataframe of kcal conversions
-
-#Combine kcal conversions for other oilseeds
-other_oilseeds <- tibble(crop = "Other oilseeds", kcal_per_tonne = mean(kcal[c(which(kcal$crop %in% c(
-  "Hempseed", "Kapokseed in shell", "Karite nuts (sheanuts)", "Linseed", "Melonseed", "Poppy seed", "Safflower seed", 
-  ))), 2]$kcal_per_tonne))
-kcal <- rbind(kcal,other_oilseeds)  #add to dataframe of kcal conversions
-
-#Combine kcal conversions for other roots and tubers
-
-rm(dried_pulses, yam, swp, swp_yam, other_veg, other_fruit, other_cereals, other_oilseeds, other_roots) #clean environment
-
-#rename items that we we filter to. NOTE that cotton could be include or excluded based on analyst's choice.
+#rename items that we we filter to. ##We omit non-caloric crops and crops we can't match between dataframes: cocoa beans, tea, tobacco, rubber, coffee (green), "other crops", and "other fibre crops".
 d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of barley" = "Barley", "Growing of cassava" = "Cassava",
                         "Growing of coconuts" =  "Coconuts" , "Growing of raw cotton" = "Cottonseed", "Growing of groundnuts" = "Groundnuts, with shell",
                         "Growing of grain maize" =  "Maize","Growing of millet" =  "Millet","Growing of oil palm fruit" =  "Oil palm fruit",
@@ -98,15 +77,25 @@ d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of bar
                         "Growing of olives" =  "Olives", "Growing of plantains" =  "Plantains and others", "Growing of soybeans" = "Soybeans",
                         "Growing of sweet potato and yams" = "Sweet Potato and Yams",
                         "Growing of other vegetables" = "Other vegetables", "Growing of dried pulses" = "Dried pulses", 
-                        "Growing of other fruits" = "Other fruit", "Growing of other cereals" = "Other cereals", "Growing of other oilseeds" = "Other oilseeds")
+                        "Growing of other fruits" = "Other fruit", "Growing of other cereals" = "Other cereals", "Growing of other oilseeds" = "Other oilseeds",
+                        "Growing of other roots and tubers" = "Other roots", "Growing of citrus fruits" = "Citrus fruits")
+
 
 #join kcal/ton to primary dataframe
+#list crops from FOFA and kcal excluded
+unique(anti_join(d, kcal, by = c("Item" = "crop"))$Item)
+
+anti_join(kcal, d, by = c("crop" = "Item")) %>% 
+    filter(!crop %in% c(cereals, cit, fruit, oilseeds, pulses, roots, swp, veg)) 
+#indicates that nuts, green maize, and mushrooms are omitted
+    
 d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
-fofa_crops_not_joined <- unique(anti_join(d, kcal, by = c("Item" = "crop"))$Item) #crops from FOFA with no kcal match
-conversion_crops_not_joined <- unique(anti_join(kcal, d, by = c("crop" = "Item"))$crop) #crops from  kcal with no FOFA match
 
 #multiply all production columns by kcal/ton
 d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
+
+#clean environment
+rm(citrus, kcal, cereals, cit, fruit, oilseeds, pulses, roots, swp, veg, dried_pulses, swp_yam, other_veg, other_fruit, other_cereals, other_oilseeds, other_roots) 
 
 # Aggregate by region -----------------------------------------------------
 #Define regions
