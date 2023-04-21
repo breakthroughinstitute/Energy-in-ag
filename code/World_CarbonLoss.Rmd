@@ -4,12 +4,12 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-setwd("int_data/qgis_output/")
 library(tidyverse)
 
 #Combine output from QGIS into one dataframe
-f <- list.files(pattern = '*.xlsx', recursive=T)
+f <- paste0("int_data/qgis_output/", list.files(path = "int_data/qgis_output/", pattern = '*.xlsx', recursive=T))
 df.list <- lapply(f,readxl::read_excel)
+f <- sub("int_data/qgis_output/", "", f)
 names(df.list) <- sub("\\..*", "", f)
 carbon <- bind_rows(df.list, .id = "id")
 carbon <- select(carbon, id, lucsum, soilsum, vegsum , ADMIN, ADM0_A3, NAME, NAME_LONG, BRK_NAME)
@@ -56,7 +56,7 @@ carbon <-
 
 
 ```{r Save}
-write_csv(x = carbon, file = "../LUC_CO2_crops.csv")
+write_csv(x = carbon, file = "int_data/LUC_CO2_crops.csv")
 
 #clean
 rm(carbon, i, j, df.list, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
