@@ -23,20 +23,41 @@ tons_to_kg <- 1000
 pct_soil_loss_h <- .25 #percent of soil carbon lost when converted to cropland, per Houghton et al   
 pct_soil_loss_s <- .4 #percent of soil carbon lost when converted to cropland, per Searchinger et al 2018
 
-weighted_potential_co2_loss <- carbon %>%
-        mutate(soil_H = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
-               soil_S = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
-               veg = ((vegsum/lucsum) * c_to_co2 * tons_to_kg),
-               tot_H = soil_H+veg,
-               tot_S = soil_S+veg) %>%
-        select(-c(soil_H, soil_S, veg, lucsum, soilsum, vegsum)) %>% 
+carbon <- carbon %>%
+        mutate(soilH = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
+               soilS = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
+               veg = ((vegsum/lucsum) * c_to_co2 * tons_to_kg)
+               ) %>%
+        select(-c(lucsum, soilsum, vegsum)) %>% 
         pivot_wider(names_from = id,
                     names_glue = "{id}_{.value}",
-                    values_from = c(tot_H, tot_S))
+                    values_from = c(soilH, soilS, veg))
+```
 
-#save to int_data folder
-write_csv(x = weighted_potential_co2_loss, file = "../LUC_CO2_crops.csv")
+```{r Gap fill}
+#Replace 0's with NAs. Then fill missing values with avg CO2 loss across all countries for the given crop (essentially fill missing vaues with average of non-zero CO2 loss values across all countries for given crop's (veg or soil) column of CO2 emissions. 
+carbon[carbon == 0] <- NA 
+for (i in 6:ncol(carbon)) {
+  for (j in 1:nrow(carbon)) {
+    ifelse(is.na(carbon[j,i]), carbon[j,i] <- mean(as.numeric(unlist(carbon[,i])),na.rm = TRUE), carbon[j,i])
+  }
+}
+```
+
+```{r Calculate total carbon loss values}
+carbon <- 
+  carbon %>% 
+  pivot_longer(banps_soilH:whea_veg, names_to = c("crop", "var"), names_pattern = "(.*)_(.*.)") %>% 
+  pivot_wider(names_from = var, values_from = value) %>% 
+  mutate(tot_H = soilH+veg, 
+       tot_S = soilS+veg) %>% 
+  select(-c(soilH, soilS, veg))
+```
+
+
+```{r Save}
+write_csv(x = carbon, file = "../LUC_CO2_crops.csv")
 
 #clean
-rm(carbon, df.list, weighted_potential_co2_loss, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
+rm(carbon, i, j, df.list, carbon, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
 ```
