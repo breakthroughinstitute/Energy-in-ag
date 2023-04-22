@@ -203,122 +203,86 @@ reg_C_aggregate <- aggregate_reg(reg_E, "Central")
 reg_other_country <- reg %>% filter(!Country_rename %in% c("N_Afr", "C_Afr", "S_Afr","E_Afr","W_Afr")) %>% select(-Country_rename)
 
 #Join Africa data with all of the countries' (non Africa) data
-reg_other_country <- bind_rows(reg_other_country, reg_C_aggregate, reg_E_aggregate, reg_S_aggregate, reg_W_aggregate, reg_N_aggregate)
+reg_all_countries <- bind_rows(reg_other_country, reg_C_aggregate, reg_E_aggregate, reg_S_aggregate, reg_W_aggregate, reg_N_aggregate)
 ```
 
 #Regression Code
-```{r Run OLS linear regressions with filtered regression data to estimate relationship between yield and input use factor }
+```{r Explore data and remove outliers}
 
 #OLS model includes country fixed effect to reduce bias
 
 reg_all_countries <- naniar::replace_with_na_all(data = reg_all_countries, condition = ~.x == 0) #Make sure all 0's are converted to NAs, lm function automatically removes data with NAs 
 
-#Outlier detection is based on yield values, could extend to the other inputs 
-summary(reg_all_countries$yield) #Min.(20937), 1st Qu (3,022,995), Median (5,060,624), Mean (5,976,161), 3rd Qu. (7,910,443 ), Max.(34,303,176) 
-boxplot(reg_all_countries$yield)
-hist(reg_all_countries$yield,
-  xlab = "yield",
-  main = "Histogram of yield",
-  breaks = sqrt(nrow(reg_all_countries))) # set number of bins
-#Barbados, Kuwait, Belgium, Martinque occupy many of the highest values
-#higher than 2*10^7 is an outlier based on historgram and barplot
-sum(reg_all_countries$yield >= 20000000) #36 entries
-sum(reg_all_countries$yield >= 20000000)/nrow(reg_all_countries) #~.5% of total entries
+# #Outlier detection is based on yield values, could extend to the other inputs 
+# summary(reg_all_countries$yield)
+# boxplot(reg_all_countries$yield)
+# hist(reg_all_countries$yield,
+#   xlab = "yield",
+#   main = "Histogram of yield",
+#   breaks = sqrt(nrow(reg_all_countries))) # set number of bins
+# #Barbados, Kuwait, Belgium, Martinque occupy many of the highest values
+# #higher than 2*10^7 is an outlier based on historgram and barplot
+# sum(reg_all_countries$yield >= 20000000, na.rm=T) #32 entries
+# sum(reg_all_countries$yield >= 20000000, na.rm=T)/nrow(reg_all_countries) #~.5% of total entries
 filter_reg <- filter(reg_all_countries, reg_all_countries$yield < 20000000)
-#filter_reg_yrs <- filter(filter_reg, filter_reg$year > 1996) #sensitivity analysis - use last 20 years of data
 
-#data on outliers for inputs
-summary(reg_all_countries$synthetic_nitrogen_fertilizers)
-boxplot(reg_all_countries$synthetic_nitrogen_fertilizers)
-hist(reg_all_countries$synthetic_nitrogen_fertilizers,
-  xlab = "fuel",
-  main = "Histogram of fuel",
-  breaks = sqrt(nrow(reg_all_countries)))
-
-summary(reg_all_countries$fert_use)
-boxplot(reg_all_countries$fert_use)
-hist(reg_all_countries$fert_use,
-  xlab = "fert_use",
-  main = "Histogram of fuel",
-  breaks = sqrt(nrow(reg_all_countries)))
-
-boxplot(reg_all_countries$pesticides_total)
-hist(reg_all_countries$pesticides_total,
-  xlab = "pesticides",
-  main = "Histogram of fuel",
-  breaks = sqrt(nrow(reg_all_countries)))
-
-summary(reg_all_countries$fuel_emissions)
-hist(reg_all_countries$fuel_emissions,
-  xlab = "fuel",
-  main = "Histogram of fuel",
-  breaks = sqrt(nrow(reg_all_countries)))
-
-#Sensitivity - calculate global values for each column in filter_reg
-#temp <- filter_reg
-#temp[is.na(temp)] <- 0
-#world_reg <- temp %>% group_by(year) %>% summarise(across(-country, sum))
-#world_reg$yield <- world_reg$production_kcal/world_reg$cropland_ha
-#world_reg$en_emiss_ha <- world_reg$fuel_emissions/world_reg$cropland_ha
-#world_reg$p_ha <- world_reg$pesticides_total/world_reg$cropland_ha
-#world_reg$fert_emiss_ha <- world_reg$synthetic_nitrogen_fertilizers/world_reg$cropland_ha
-#world_reg$fert_use_ha <- world_reg$fert_use/world_reg$cropland_ha
-#world_reg$country <- "World"
-#world_reg[world_reg == 0] <- NA
-#filter_reg_2 <- full_join(filter_reg, world_reg)
-
-#Sensitivity , increase fertilizer data by 3X
-# filter_reg$synthetic_nitrogen_fertilizers <- filter_reg$synthetic_nitrogen_fertilizers  * 3
-# filter_reg$fert_use <- filter_reg$fert_use * 3
-# filter_reg$fert_emiss_ha <- filter_reg$synthetic_nitrogen_fertilizers/filter_reg$cropland_ha
-# filter_reg$fert_use_ha <- filter_reg$fert_use/filter_reg$cropland_ha
-
-#Pesticides Use OLS regression
-p.ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country))
-#p.ols <- lm(filter_reg_2, formula = log(p_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
-#p.ols <- lm(filter_reg_yrs , formula = log(p_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
-
-
-#Fuel Emissions OLS Regression
-filter_f_reg <- filter(filter_reg, filter_reg$en_emiss_ha > 0)
-fuel.ols <- lm(filter_f_reg , formula = log(en_emiss_ha) ~ log(yield) + factor(country))
-#filter_f_reg_2 <- filter(filter_reg_2, filter_reg_2$en_emiss_ha > 0)
-#fuel.ols <- lm(filter_f_reg_2 , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
-#fuel.ols <- lm(filter_f_reg_2 , formula = log(en_emiss_ha) ~ log(yield) + factor(country))
-
-#filter_f_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$en_emiss_ha > 0)
-#fuel.ols <- lm(filter_f_reg_yrs , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
-
-
-#Synthetic N emissions OLS Regression 
-filter_syn_reg <- filter(filter_reg, filter_reg$fert_emiss_ha > 0)
-syn_n.ols <- lm(filter_syn_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #no #outliers in boxplot
-
-#filter_syn_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$fert_emiss_ha > 0)
-#syn_n.ols <- lm(filter_syn_reg_yrs, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
-
-#Global yield sensitivity 
-#filter_syn_reg_2 <- filter(filter_reg_2, filter_reg_2$fert_emiss_ha > 0)
-#syn_n.ols <- lm(filter_syn_reg_2, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
-
-#Synthetic N use or application OLS regression
-filter_fert_use_reg <- filter(filter_reg, filter_reg$fert_use_ha > 0)
-fert_use.ols <- lm(filter_fert_use_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))
-
-#filter_fert_use_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$fert_use_ha > 0)
-#fert_use.ols <- lm(filter_fert_use_reg_yrs, formula = log(fert_use_ha) ~ log(yield) + factor(country))
-#Global yield sensitivity 
-#filter_fert_use_reg_2 <- filter(filter_reg_2, filter_reg_2$fert_use_ha > 0)
-#fert_use.ols <- lm(filter_fert_use_reg_2, formula = log(fert_use_ha) ~ log(yield) + factor(country))
+##data on outliers for inputs
+# summary(reg_all_countries$fert_emiss)
+# boxplot(reg_all_countries$fert_emiss)
+# hist(reg_all_countries$fert_emiss,
+#   xlab = "fuel",
+#   main = "Histogram of fuel",
+#   breaks = sqrt(nrow(reg_all_countries)))
+# 
+# summary(reg_all_countries$fert_use)
+# boxplot(reg_all_countries$fert_use)
+# hist(reg_all_countries$fert_use,
+#   xlab = "fert_use",
+#   main = "Histogram of fuel",
+#   breaks = sqrt(nrow(reg_all_countries)))
+# 
+# boxplot(reg_all_countries$pesticides_total)
+# hist(reg_all_countries$pesticides_total,
+#   xlab = "pesticides",
+#   main = "Histogram of fuel",
+#   breaks = sqrt(nrow(reg_all_countries)))
+# 
+# summary(reg_all_countries$fuel_emissions)
+# hist(reg_all_countries$fuel_emissions,
+#   xlab = "fuel",
+#   main = "Histogram of fuel",
+#   breaks = sqrt(nrow(reg_all_countries)))
 
 ```
+
+```{r Run OLS linear regressions with filtered regression data to estimate relationship between yield and input use factor}
+#Pesticides Use OLS regression
+p.ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country))
+
+#Fuel Emissions OLS Regression
+fuel.ols <- lm(filter_reg , formula = log(en_emiss_ha) ~ log(yield) + factor(country))
+
+#Synthetic N emissions OLS Regression 
+syn_n.ols <- lm(filter_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #no #outliers in boxplot
+
+#Synthetic N use or application OLS regression
+fert_use.ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))
+```
+
+```{r Sensitivity analysis running OLS with data filtered to last 20 years}
+#filter_reg_yrs <- filter(filter_reg, filter_reg$year > 1996) #sensitivity analysis - use last 20 years of data
+#p.ols <- lm(filter_reg_yrs , formula = log(p_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
+#fuel.ols <- lm(filter_reg_yrs , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
+#syn_n.ols <- lm(filter_reg_yrs, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
+#fert_use.ols <- lm(filter_reg_yrs, formula = log(fert_use_ha) ~ log(yield) + factor(country))
+```
+
 
 ```{r Import yields for each scenario and region to estumate input use and emissions}
 
 scenarios <- read_csv("int_data/scenarios.csv") #yields are in kcal/ha
 #Convert country names in scenarios to East, West, Central, South, North
 scenarios$region <- recode(scenarios$region, E_Afr = "East", C_Afr = "Central", S_Afr = "South", N_Afr = "North", W_Afr = "West")
-#scenarios$...1 <- NULL
 
 b <- filter(scenarios, scenario == "b")
 b_e <- b %>% filter(region=="East") %>% select(yield, country = region)
