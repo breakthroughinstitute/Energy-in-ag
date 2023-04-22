@@ -1,9 +1,5 @@
 # Setup -------------------------------------------------------------------
-library(readr)
-library(dplyr)
-library(tidyr)
-library(reshape2)
-
+library(tidyverse)
 # Load Data ---------------------------------------------------------------
 d <- read_csv("raw_data/FOFA2050CountryData_Crop-production.csv") #Import FOFA 2050 data
 
@@ -124,6 +120,8 @@ d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign r
                                      CountryName %in% N_Afr ~ "N_Afr"),
                   Africa = case_when(CountryName %in% Africa ~ "Africa"))
 
+africa_scenario_countries <- d %>% filter(Africa=="Africa") %>% select(CountryName) %>% distinct() %>% pull()
+
 #select only columns for scenarios
 scenario_d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>% filter(is.na(Africa)==F)
 
@@ -155,67 +153,13 @@ write_csv(regions_scenario,"int_data/scenarios.csv")
 
 # Calculate avg CO2 loss by crop & country --------------------------------
 
-#Import World CO2 Loss file: kg CO2 emitted (veg CO2 loss and soil CO2 loss) ha LUC of a particular crop. 
-#This table include LUC emissions (CO2 equiv)/ha using Searchinger's (40%) and Houghton's (25%) estimates of soil carbon loss for cropland conversion for each crop by country
-World_CO2_loss <- read.csv("Energy and GHG Analysis (2019)/Analysis/Calc LUC_EnergyAg/Land Use Change Emissions/World_CO2_loss.csv")
+#Import csv with total kg CO2 emitted (veg CO2 loss and soil CO2 loss) per ha LUC of a particular crop, by country in Africa. 
+#This table include values using Searchinger's 40% (S) and Houghton's 25% (H) estimates of soil carbon loss for cropland conversion
+CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv")
 
-CO2_loss <- as.data.frame(World_CO2_loss[, c(2:36)]) #only include cols on carbon emissions/ha (in terms of veg and soil, not totals) using Houhgton's estimates. 
-#change African country names in World_CO2_loss so that they match Africa list starting at line 85
+#change African country names in World_CO2_loss so that they match Africa list
 CO2_loss[CO2_loss$Country == "Congo",]$Country <- "Republic of the Congo" 
 CO2_loss[CO2_loss$Country == "Tanzania, United Republic of",]$Country <- "United Republic Of Tanzania" 
-
-       #Item=="Growing of bananas",]$Item <- "banps"
-
-CO2_loss_Africa <- filter(CO2_loss, Country %in% Africa)
-CO2_loss_Africa$maiz_veg_H <- as.numeric(as.character(unlist(CO2_loss_Africa$maiz_veg_H)))
-CO2_loss_Africa$maiz_soil_H <- as.numeric(as.character(unlist(CO2_loss_Africa$maiz_soil_H)))
-#DATA FILL. 2 steps.
-
-#1. Replaces 0's with NAs. Fill missing values with avg CO2 loss across all countries for the given crop (essentially fill missing vaues with average of non-zero CO2 loss values across all countries for given crop's (veg or soil) column of CO2 emissions. 
-CO2_loss_Africa[CO2_loss_Africa == 0] <- NA #only applies for cols 3,4, the banana cols
-for (i in 2:ncol(CO2_loss_Africa)) {
-  for (j in 1: nrow(CO2_loss_Africa)) {
-    ifelse(is.na(CO2_loss_Africa[j,i]), CO2_loss_Africa[j,i] <- mean(as.numeric(unlist(CO2_loss_Africa[,i])),na.rm = TRUE), CO2_loss_Africa[j,i])
-  }
-}
-
-#Replace banana CO2 loss with average of all other crops' CO2 losses for soil and veg since banana has missing alues across all countries.
-
-cols_soil <- grep("*_soil_H", colnames(CO2_loss_Africa)) #store cols for soil
-cols_soil <- cols_soil[-1] #take out banana col
-cols_veg <- grep("*_veg_H", colnames(CO2_loss_Africa)) #store cols for veg
-cols_veg <- cols_veg[-1] #take out banana col
-
-CO2_loss_Africa_s <- CO2_loss_Africa[, cols_soil] #subset out cols with soil carbon loss values
-CO2_loss_Africa_s$banps_soil <- rowMeans(CO2_loss_Africa_s) #banana carbon loss value equals the avg carbon loss values of all of the other crops
-
-CO2_loss_Africa_v <- CO2_loss_Africa[, cols_veg] #subset out cols with veg carbon loss values
-CO2_loss_Africa_v$banps_veg <- rowMeans(CO2_loss_Africa_v) #banana carbon loss value equals the avg carbon loss values of all of the other crops
-
-#Store new banana values into original dataset
-CO2_loss_Africa$banps_soil_H <- CO2_loss_Africa_s$banps_soil 
-CO2_loss_Africa$banps_veg_H<-CO2_loss_Africa_v$banps_veg
-
-#Add together soil and veg CO2 losses for each crop by country
-CO2_Afr_crop <- as.data.frame(matrix(0, nrow = nrow(CO2_loss_Africa), ncol = 1)) #ncol equal number of crops, nrow equals number of countries
-CO2_Afr_crop$banps <- CO2_loss_Africa$banps_soil_H + CO2_loss_Africa$banps_veg_H
-CO2_Afr_crop$maiz <- CO2_loss_Africa$maiz_soil_H + CO2_loss_Africa$maiz_veg_H
-CO2_Afr_crop$barls <- CO2_loss_Africa$barls_soil_H + CO2_loss_Africa$barls_veg_H
-CO2_Afr_crop$cass <- CO2_loss_Africa$cass_soil_H+ CO2_loss_Africa$cass_veg_H
-CO2_Afr_crop$mill <- CO2_loss_Africa$mill_soil_H + CO2_loss_Africa$mill_veg_H
-CO2_Afr_crop$grou <- CO2_loss_Africa$grou_soil_H + CO2_loss_Africa$grou_veg_H
-CO2_Afr_crop$ooil <- CO2_loss_Africa$ooil_soil_H + CO2_loss_Africa$ooil_veg_H
-CO2_Afr_crop$opul <- CO2_loss_Africa$opul_soil_H + CO2_loss_Africa$opul_veg_H
-CO2_Afr_crop$pota <- CO2_loss_Africa$pota_soil_H + CO2_loss_Africa$pota_veg_H
-CO2_Afr_crop$rice <- CO2_loss_Africa$rice_soil_H+ CO2_loss_Africa$rice_veg_H
-CO2_Afr_crop$sorg <- CO2_loss_Africa$sorg_soil_H + CO2_loss_Africa$sorg_veg_H
-CO2_Afr_crop$soyb <- CO2_loss_Africa$soyb_soil_H + CO2_loss_Africa$soyb_veg_H
-CO2_Afr_crop$sugb <- CO2_loss_Africa$sugb_soil_H + CO2_loss_Africa$sugb_veg_H
-CO2_Afr_crop$sugc <- CO2_loss_Africa$sugc_soil_H + CO2_loss_Africa$sugc_veg_H
-CO2_Afr_crop$swpy <- CO2_loss_Africa$swpy_soil_H + CO2_loss_Africa$swpy_veg_H
-CO2_Afr_crop$whea <-CO2_loss_Africa$whea_soil_H + CO2_loss_Africa$whea_veg_H
-CO2_Afr_crop$V1 <- CO2_loss_Africa$Country
-colnames(CO2_Afr_crop)[1] <- "Country"
 
 # # Lower estimate of LUC -------------------------------------------------
 # # Leave negative LUC values as-is. This does not reflect shifting cropland. Negative LUC means that farmland is abandoned and becomes native vegetation.
@@ -243,7 +187,6 @@ colnames(CO2_Afr_crop)[1] <- "Country"
 # LUC[LUC=="Soybeans"] <- "soyb"
 
 #join co2/ha value to LUC dataframe
-CO2_Afr_crop2 <- melt(CO2_Afr_crop) #will allow for joining data
 colnames(CO2_Afr_crop2) <- c("Country", "Crop", "CO2/ha")
 # LUC_CO2 <- right_join(LUC, CO2_Afr_crop2, by = c("CountryName" = "Country", "Item" = "Crop")) #should eliminate crops in LUC dataset that do not have corresponding crop match in the CO2_Afr_crop2 dataset (derived from MAPSPAM analysis). 
 # 
