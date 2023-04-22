@@ -5,10 +5,15 @@
 - results: 
 - data: 
 
+*Raw Data:*
+- FAOStat
+-- Fertilizer N use per ha of cropland - downloaded 04/21/2023. Units are kg N/ha. FAO metadata indicates values are "the ratio between the totals by nutrient of agricultural use of chemical or mineral fertilizers, reported in the FAOSTAT domain “Inputs/Fertilizers by Nutrient” for nitrogen (N)...and the area of cropland reported in the FAOSTAT domain “Inputs/Land Use”"
+-- Fertilizer N Agricultural Use  - downloaded 04/21/2023. Units are tonnes nutrient nitrogen (N).\
+-- fert_use_emissions.csv - Total emissions from synthetic fertilizer application. Downloaded 04/21/2023 from https://www.fao.org/faostat/en/#data/GT, selecting "Synthetic Fertilizers" and "Emissions (CO2eq) (AR5)". Original units are kilotonnes (gigagrams) CO2e
 
 *Code:* 
 First, run calculate_calories_per_cropland.Rmd
-- We omit all country-crop combinations lacking complete data (where there are any NAs in the time frame). We then convert total crop production (in tons) from all countries from 1961-2017 to kilocalories, using FAO's nutritive factors. We then calculate kilocalories per hectare, a measure of total yields by country. 
+- We omit all country-crop combinations lacking complete data (where there are any NAs in the time frame). We then convert total crop production (in tons) from all countries from 1961-2017 to kilocalories, using FAO's nutritive factors. We then calculate kilocalories per hectare, a measure of total yields by country. This is used in the regression analysis.
 INPUT: FAOSTAT_production_all_crops.csv, cal_per_tonne_by_crop.csv, FAOSTAT_Cropland.csv
 OUTPUT: prod.cropland.csv
 

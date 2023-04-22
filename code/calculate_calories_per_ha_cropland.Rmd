@@ -1,5 +1,5 @@
 ---
-title: "Calculate Calories Produced per Hectare Cropland"
+title: "Calculate Calories Produced by Country and year"
 output: html_notebook
 author: "Dan Rejto"
 date: "Apr 13, 23"
@@ -71,21 +71,17 @@ sum(prod2$Kcal) / sum(prod$Kcal, na.rm=T) #removing NAs only reduced total produ
 prod <- prod2
 ```
 
-```{r Calcalate kcal per hectare by country and year}
+```{r Join production and cropland data}
 #sum kcal across all crops, by year and country
 tot_prod <- prod %>% 
   group_by(country, year) %>% 
-  summarize(tot_kcal = sum(Kcal))
+  summarize(tot_kcal = sum(Kcal)) %>% 
+  inner_join(cropland) #join cropland and production datasets
 
-#join cropland and production datasets
-ylds <- inner_join(tot_prod, cropland)
-#this removes some rows, but this is not due to a mismatch in country naming across the datasets, but rather differences in data completeness across datasets
-
-#calculate calorie yields per ha
-ylds <- ylds %>% mutate(kcal_ha = tot_kcal/cropland)
+#join this removes some rows, but this is not due to a mismatch in country naming across the datasets, but rather differences in data completeness across datasets
 ```
 
 ```{r Save}
-write_csv(ylds, "../int_data/prod.cropland.csv")
+write_csv(tot_prod, "../int_data/prod.cropland.csv")
 rm(list = ls())
 ```
