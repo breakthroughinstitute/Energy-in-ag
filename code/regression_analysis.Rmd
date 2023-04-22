@@ -269,6 +269,24 @@ syn_n.ols <- lm(filter_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(c
 fert_use.ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))
 ```
 
+
+```{r Sanity Check on parameters - optional for running}
+#Check to see that that the model fitted values match the log(actual values) in the regression dataset, values should fall around 1:1 line
+
+# plot(x = log(na.omit(filter_reg$p_ha)), y = p.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of pesticide/ha values")
+# abline(b=1, a=0) #values fall around this 1:1 line 
+# 
+# plot(x = log(na.omit(filter_reg$en_emiss_ha)), y = fuel.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
+#  abline(b=1, a=0) #values fall around this 1:1 line 
+# 
+# plot(x = log(na.omit(filter_reg$fert_emiss_ha)), y = syn_n.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
+# abline(b=1, a=0) #values fall around this 1:1 line 
+# 
+# plot(log(na.omit(filter_reg$fert_use_ha)), fert_use.ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
+# abline(b=1, a=0) #values fall around this 1:1 line 
+```
+
+
 ```{r Sensitivity analysis running OLS with data filtered to last 20 years}
 #filter_reg_yrs <- filter(filter_reg, filter_reg$year > 1996) #sensitivity analysis - use last 20 years of data
 #p.ols <- lm(filter_reg_yrs , formula = log(p_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
@@ -283,6 +301,8 @@ fert_use.ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(
 scenarios <- read_csv("int_data/scenarios.csv") #yields are in kcal/ha
 #Convert country names in scenarios to East, West, Central, South, North
 scenarios$region <- recode(scenarios$region, E_Afr = "East", C_Afr = "Central", S_Afr = "South", N_Afr = "North", W_Afr = "West")
+
+scenario_yields <- select(scenarios, country=region, yield, scenario)
 
 b <- filter(scenarios, scenario == "b")
 b_e <- b %>% filter(region=="East") %>% select(yield, country = region)
@@ -367,6 +387,45 @@ h_alt_a <- h_alt %>% filter(region=="Africa") %>% select(yield, country = region
 # synN_emis_p <- area_p$harv_area * synN_p[1]
 # synN_emis_h <- area_h$harv_area * synN_h[1]
 ```
+
+```{r Calculate predicted input use per ha by input, scenario and region}
+#fixed effect regression results
+reg_fe <- function(dependent_variable, scenario, region){
+  output <- exp(predict(dependent_variable, 
+              newdata = scenario_yields[scenario_yields$country==region & scenario_yields$scenario==scenario, c("country", "yield")], 
+              interval = "confidence", level = 0.95))
+  return(output)
+}
+
+reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
+
+i=1
+#define regions to loop through
+regions <- unique(scenarios$region)
+regions <- regions[!regions =="Africa"]
+
+#map variables to model names
+var_models = tibble(var = c("en_emiss_ha", "fert_use_ha", "fert_emiss_ha", "p_ha"),
+                   model = c("fuel.ols", "fert_use.ols", "syn_n.ols", "p.ols"))
+
+#loop through each dependent variable, scenario, and region to predict each dep variable for each region & scenario
+for (dependent_variable in var_models$var) {
+  
+  for (scenario in unique(scenarios$scenario)){
+    for (region in regions){
+      
+      reg_fe_results[i,] = c(dependent_variable, 
+                            scenario, 
+                            region, 
+                            as_tibble(exp(predict(get(var_models$model[var_models$var==dependent_variable]), #choose regression model 
+              newdata = scenario_yields[scenario_yields$country==region & scenario_yields$scenario==scenario, c("country", "yield")], 
+              interval = "confidence", level = 0.95))))
+      i=i+1
+    }
+  }
+}
+```
+
 
 ```{r Predict pesticide use/ha for each region}
 
@@ -706,7 +765,7 @@ rownames(p_app) <- NULL
 
 ```
 
-```{r Create table of results - moved this code chunk to after machinery ols is calculated}
+```{r Delete? Create table of results - moved this code chunk to after machinery ols is calculated}
 
 #write_csv(predict_tbl, path = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/predict_tbl.csv")
 
@@ -741,183 +800,178 @@ rownames(p_app) <- NULL
 
 ```
 
-```{r Calculate emissions for each input source, region, and scenario}
-area_b <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "b")
-area_p <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "p")
-#area_h <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "high")
-area_h_alt <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "h")
-
+```{r Calculate total predicted emissions for each input source, region, and scenario}
 #Conversion factors for fertilizer and pesticides manufacturing emissions
 fert_ef <- 5.66 #5.66 kg CO2 eq/kg product  is the fertilizer EF
 pest_ef <- 25.5 # 25.5 kg cO2e/kg applied is the pesticides EF
 kg_to_Gg <- 1/10^6  #1 Gg/1 * 10^6 kg
 tons_to_Gg <- .001 #tons to Gg; formula with units : X tons applied *  Y tons CO2eq/tons product applied * .001 Gg/ ton. Y represents the pesticides emissions factor.
 
-
-
-#total input use
-as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1] * kg_to_Gg
-as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1] 
-
-#Baseline
-#Syn N manufacturing emissions (synthetic N Use is in kg per ha)
-synNuse_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synNuse_b_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synN_b_e[1]" refers to the fitted synthetic n use/ha.
-synNuse_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synNuse_b_w[1] * fert_ef * kg_to_Gg 
-synNuse_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synNuse_b_s[1] * fert_ef * kg_to_Gg 
-synNuse_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synNuse_b_c[1] * fert_ef * kg_to_Gg 
-synNuse_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synNuse_b_n[1] * fert_ef * kg_to_Gg 
-synNuse_emis_b <- rbind(synNuse_emis_b_e, synNuse_emis_b_w, synNuse_emis_b_s, synNuse_emis_b_c, synNuse_emis_b_n)
-
-#Syn N emissions (Gg CO2e original units, final results are in Gg CO2e )
-synN_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synN_b_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_b_e[1]" refers to the fitted synthetic n emis/ha.
-synN_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synN_b_w[1] 
-synN_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synN_b_s[1] 
-synN_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synN_b_c[1] 
-synN_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synN_b_n[1] 
-synN_emis_b <- rbind(synN_emis_b_e, synN_emis_b_w, synN_emis_b_s, synN_emis_b_c, synN_emis_b_n)
-
-#Fuel Emissions (Gg CO2e are original units, final results are also in Gg CO2e)
-f_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * fuel_b_e[1] # results in fuel emissions in Gg CO2e. "fuel_b_e[1]" refers to the fitted  fuel emis/ha.
-f_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * fuel_b_w[1] 
-f_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * fuel_b_s[1] 
-f_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * fuel_b_c[1] 
-f_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * fuel_b_n[1] 
-f_emis_b <- rbind(f_emis_b_e, f_emis_b_w,f_emis_b_s,f_emis_b_c, f_emis_b_n)
-
-#Pesticides manufacturing emissions (#Pesticides use is in tons per ha )
-p_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1]  * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_b_e[1]" refers to the fitted pesticides emis/ha.
-p_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * pest_b_w[1]   * pest_ef  * tons_to_Gg
-p_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * pest_b_s[1]  * pest_ef  * tons_to_Gg
-p_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * pest_b_c[1]  * pest_ef  * tons_to_Gg 
-p_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * pest_b_n[1]  * pest_ef  * tons_to_Gg
-p_emis_b <- rbind(p_emis_b_e , p_emis_b_w,p_emis_b_s,p_emis_b_c ,p_emis_b_n)
-
-baseline_emis <- cbind(synNuse_emis_b, synN_emis_b,f_emis_b, p_emis_b) #emissions are in #Gigagrams for each region of Africa
-rownames(baseline_emis) <- c("East", "West", "Southern", "Central", "North")
-colnames(baseline_emis) <- c("synN_use_base", "synN_base", "fuel_base", "pest_base")
-
-#Projected
-synNuse_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synNuse_proj_e[1]" refers to the fitted synthetic n use/ha.
-synNuse_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synNuse_proj_w[1] * fert_ef * kg_to_Gg
-synNuse_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synNuse_proj_s[1] * fert_ef * kg_to_Gg
-synNuse_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synNuse_proj_c[1] * fert_ef * kg_to_Gg
-synNuse_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synNuse_proj_n[1] * fert_ef * kg_to_Gg
-synNuse_emis_p <- rbind(synNuse_emis_p_e, synNuse_emis_p_w, synNuse_emis_p_s, synNuse_emis_p_c, synNuse_emis_p_n)
-
-synN_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synN_proj_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_proj_e[1]" refers to the fitted synthetic n emis/ha.
-synN_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synN_proj_w[1] 
-synN_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synN_proj_s[1] 
-synN_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synN_proj_c[1] 
-synN_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synN_proj_n[1] 
-synN_emis_p <- rbind(synN_emis_p_e, synN_emis_p_w, synN_emis_p_s, synN_emis_p_c, synN_emis_p_n)
-
-f_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * fuel_proj_e[1] # results in fuel emissions in Gg CO2e. "fuel_proj_e[1]" refers to the fitted  fuel emis/ha.
-f_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * fuel_proj_w[1] 
-f_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * fuel_proj_s[1] 
-f_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * fuel_proj_c[1] 
-f_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * fuel_proj_n[1]
-f_emis_p <- rbind(f_emis_p_e, f_emis_p_w,f_emis_p_s,f_emis_p_c, f_emis_p_n)
-
-p_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * pest_proj_e[1] * tons_kg * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_proj_e[1]" refers to the fitted pesticides emis/ha.
-p_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * pest_proj_w[1] * pest_ef  * tons_to_Gg
-p_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * pest_proj_s[1]  * pest_ef  * tons_to_Gg
-p_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * pest_proj_c[1] * pest_ef  * tons_to_Gg 
-p_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * pest_proj_n[1]  * pest_ef  * tons_to_Gg
-p_emis_p <- rbind(p_emis_p_e , p_emis_p_w,p_emis_p_s,p_emis_p_c ,p_emis_p_n)
-
-proj_emis <- cbind(synNuse_emis_p, synN_emis_p,f_emis_p, p_emis_p) #emissions are in Gigagrams for each region of Africa
-rownames(proj_emis) <- c("East", "West", "South", "Central", "North")
-colnames(proj_emis) <- c("synN_use_proj", "synN_proj", "fuel_proj", "pest_proj")
-
-#High_alt
-synNuse_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synNuse_h_alt_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synNuse_h_alt_e[1]" refers to the fitted synthetic n use/ha.
-synNuse_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synNuse_h_alt_w[1] * fert_ef * kg_to_Gg
-synNuse_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synNuse_h_alt_s[1] * fert_ef * kg_to_Gg
-synNuse_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synNuse_h_alt_c[1] * fert_ef * kg_to_Gg
-synNuse_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synNuse_h_alt_n[1] * fert_ef * kg_to_Gg
-synNuse_emis_h_alt <- rbind(synNuse_emis_h_alt_e, synNuse_emis_h_alt_w, synNuse_emis_h_alt_s, synNuse_emis_h_alt_c, synNuse_emis_h_alt_n) 
-
-synN_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synN_h_alt_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_h_alt_e[1]" refers to the fitted synthetic n emis/ha.
-synN_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synN_h_alt_w[1] 
-synN_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synN_h_alt_s[1] 
-synN_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synN_h_alt_c[1] 
-synN_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synN_h_alt_n[1] 
-synN_emis_h_alt <- rbind(synN_emis_h_alt_e, synN_emis_h_alt_w, synN_emis_h_alt_s, synN_emis_h_alt_c, synN_emis_h_alt_n)
-
-f_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * fuel_h_alt_e[1] # results in fuel emissions in Gg CO2e. "fuel_h_alt_e" refers to the fitted  fuel emis/ha.
-f_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * fuel_h_alt_w[1] 
-f_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * fuel_h_alt_s[1] 
-f_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * fuel_h_alt_c[1] 
-f_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * fuel_h_alt_n[1] 
-f_emis_h_alt <- rbind(f_emis_h_alt_e, f_emis_h_alt_w,f_emis_h_alt_s,f_emis_h_alt_c, f_emis_h_alt_n)
-
-p_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * pest_h_alt_e[1] * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_h_alt_e[1]" refers to the fitted pesticides emis/ha for east Africa.
-p_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * pest_h_alt_w[1]   * pest_ef  * tons_to_Gg
-p_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * pest_h_alt_s[1]  * pest_ef  * tons_to_Gg
-p_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * pest_h_alt_c[1] * pest_ef  * tons_to_Gg 
-p_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * pest_h_alt_n[1] * pest_ef  * tons_to_Gg
-p_emis_h_alt <- rbind(p_emis_h_alt_e , p_emis_h_alt_w, p_emis_h_alt_s, p_emis_h_alt_c , p_emis_h_alt_n)
-
-h_alt_emis <- cbind(synNuse_emis_h_alt,synN_emis_h_alt,f_emis_h_alt, p_emis_h_alt)
-rownames(h_alt_emis) <- c("East", "West", "Southern", "Central", "North")
-colnames(h_alt_emis) <- c("synN_use_h_alt", "synN_h_alt", "fuel_h_alt", "pest_h_alt")
- 
-#Save emissions for each scenario in a .csv file
-emissions <- cbind(baseline_emis, proj_emis, h_alt_emis )  # in gigagrams
-
-#Fertilizer and pesticides application rate for Africa for each scenario
-#High_alt scenario
-cropland_high_afr <- colSums(area_h_alt[c(1:5),1]) #add up the regional cropland areas, the "Africa" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
-synNuse_high_afr <- (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synNuse_h_alt_e[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synNuse_h_alt_w[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synNuse_h_alt_s[1]) +(as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synNuse_h_alt_c[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synNuse_h_alt_n[1])
-synNuse_ha_h_afr <- synNuse_high_afr/cropland_high_afr
-
-#Proj Scenario
-cropland_p_afr <- colSums(area_p[c(1:5),1]) #add up the regional cropland areas, the "Afria" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
-synNuse_p_afr <- (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synNuse_proj_w[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synNuse_proj_s[1]) +(as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synNuse_proj_c[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synNuse_proj_n[1])
-synNuse_ha_p_afr <- synNuse_p_afr/cropland_p_afr
-
-#Baseline
-cropland_b_afr <- colSums(area_b[c(1:5),1]) #add up the regional cropland areas, the "Afria" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
-synNuse_b_afr <- (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synNuse_b_e[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synNuse_b_w[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synNuse_b_s[1]) +(as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synNuse_b_c[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synNuse_b_n[1])
-synNuse_ha_b_afr <- synNuse_b_afr/cropland_b_afr
-
-#Pesticides application Africa
-#high
-p_h_afr <- (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * pest_h_alt_e[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * pest_h_alt_w[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * pest_h_alt_s[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * pest_h_alt_c[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * pest_h_alt_n[1])
-p_ha_h_afr <- p_h_afr/cropland_high_afr
-#proj
-pest_p_afr <- (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * pest_proj_e[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * pest_proj_w[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * pest_proj_s[1]) +(as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * pest_proj_c[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * pest_proj_n[1])
-pest_ha_p_afr <- pest_p_afr/cropland_p_afr
-#b
-pest_b_afr <- (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * pest_b_w[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * pest_b_s[1]) +(as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * pest_b_c[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * pest_b_n[1])
-pest_ha_b_afr <- pest_b_afr/cropland_b_afr
-
+reg_fe_results <- reg_fe_results %>% 
+  mutate(dep_var = recode(dep_var, #change var names for resulting table. for recode, format is old = new
+                          "fert_use_ha"="f_m", "p_ha"="pest", "en_emiss_ha"="en", "fert_emiss_ha"="f_a")) %>% 
+  left_join(scenarios) %>% #add production scenario variables i.e. yield, area to fe regression results table. join leaves out total Africa region
+  pivot_wider(names_from = dep_var, names_glue = "{dep_var}_{.value}", values_from = c(fit, lwr, upr)) %>% #make wide to multiple columns for fertilizer and pesticide use per ha by emission factors  
+  mutate(across(starts_with("f_m"),  ~.x*harv_area*fert_ef*kg_to_Gg), #convert kg fertilizer use/ha to Gg CO2e emissions from manufacturing for all fert use
+         across(starts_with("pest"),  ~.x*harv_area*pest_ef*tons_to_Gg), #convert tons pesticide use/ha to Gg CO2e emissions from manufacturing for all pesticide use
+         across(starts_with("en"),  ~.x*harv_area), #convert Gg CO2e from energy use per ha  to Gg CO2 from total energy use
+         across(starts_with("f_a"),  ~.x*harv_area) #convert Gg CO2e from fert application per ha to Gg CO2 from total application
+         )
 ```
 
-```{r Sanity Check on parameters - optional for running}
 
-#Check to see that that the model fitted values match the log(actual values) in the regression dataset, values should fall around 1:1 line
+```{r Old Calculate emissions for each input source, region, and scenario}
+# #calculate total input use 
+# 
+# area_b <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "b")
+# area_p <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "p")
+# #area_h <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter(scenario == "high")
+# area_h_alt <- scenarios %>% dplyr::select(harv_area, region, scenario) %>% filter( scenario == "h")
 
-# plot(x = log(na.omit(filter_reg$p_ha)), y = p.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of pesticide/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# #total input use
+# as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1] * kg_to_Gg
+# as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1] 
 # 
+# #Baseline
+# #Syn N manufacturing emissions (synthetic N Use is in kg per ha)
+# synNuse_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synNuse_b_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synN_b_e[1]" refers to the fitted synthetic n use/ha.
+# synNuse_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synNuse_b_w[1] * fert_ef * kg_to_Gg 
+# synNuse_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synNuse_b_s[1] * fert_ef * kg_to_Gg 
+# synNuse_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synNuse_b_c[1] * fert_ef * kg_to_Gg 
+# synNuse_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synNuse_b_n[1] * fert_ef * kg_to_Gg 
+# synNuse_emis_b <- rbind(synNuse_emis_b_e, synNuse_emis_b_w, synNuse_emis_b_s, synNuse_emis_b_c, synNuse_emis_b_n)
 # 
-# plot(x = log(na.omit(filter_f_reg$en_emiss_ha)), y = fuel.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
-#  abline(b=1, a=0) #values should fall around this line, some values are scattered to the left 
+# #Syn N emissions (Gg CO2e original units, final results are in Gg CO2e )
+# synN_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synN_b_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_b_e[1]" refers to the fitted synthetic n emis/ha.
+# synN_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synN_b_w[1] 
+# synN_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synN_b_s[1] 
+# synN_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synN_b_c[1] 
+# synN_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synN_b_n[1] 
+# synN_emis_b <- rbind(synN_emis_b_e, synN_emis_b_w, synN_emis_b_s, synN_emis_b_c, synN_emis_b_n)
 # 
+# #Fuel Emissions (Gg CO2e are original units, final results are also in Gg CO2e)
+# f_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * fuel_b_e[1] # results in fuel emissions in Gg CO2e. "fuel_b_e[1]" refers to the fitted  fuel emis/ha.
+# f_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * fuel_b_w[1] 
+# f_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * fuel_b_s[1] 
+# f_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * fuel_b_c[1] 
+# f_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * fuel_b_n[1] 
+# f_emis_b <- rbind(f_emis_b_e, f_emis_b_w,f_emis_b_s,f_emis_b_c, f_emis_b_n)
 # 
-# plot(x = log(na.omit(filter_syn_reg$fert_emiss_ha)), y = syn_n.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# #Pesticides manufacturing emissions (#Pesticides use is in tons per ha )
+# p_emis_b_e <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1]  * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_b_e[1]" refers to the fitted pesticides emis/ha.
+# p_emis_b_w <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * pest_b_w[1]   * pest_ef  * tons_to_Gg
+# p_emis_b_s <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * pest_b_s[1]  * pest_ef  * tons_to_Gg
+# p_emis_b_c <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * pest_b_c[1]  * pest_ef  * tons_to_Gg 
+# p_emis_b_n <- as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * pest_b_n[1]  * pest_ef  * tons_to_Gg
+# p_emis_b <- rbind(p_emis_b_e , p_emis_b_w,p_emis_b_s,p_emis_b_c ,p_emis_b_n)
 # 
-# plot(log(na.omit(filter_fert_use_reg$fert_use_ha)), fert_use.ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# baseline_emis <- cbind(synNuse_emis_b, synN_emis_b,f_emis_b, p_emis_b) #emissions are in #Gigagrams for each region of Africa
+# rownames(baseline_emis) <- c("East", "West", "Southern", "Central", "North")
+# colnames(baseline_emis) <- c("synN_use_base", "synN_base", "fuel_base", "pest_base")
+# 
+# #Projected
+# synNuse_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synNuse_proj_e[1]" refers to the fitted synthetic n use/ha.
+# synNuse_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synNuse_proj_w[1] * fert_ef * kg_to_Gg
+# synNuse_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synNuse_proj_s[1] * fert_ef * kg_to_Gg
+# synNuse_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synNuse_proj_c[1] * fert_ef * kg_to_Gg
+# synNuse_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synNuse_proj_n[1] * fert_ef * kg_to_Gg
+# synNuse_emis_p <- rbind(synNuse_emis_p_e, synNuse_emis_p_w, synNuse_emis_p_s, synNuse_emis_p_c, synNuse_emis_p_n)
+# 
+# synN_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synN_proj_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_proj_e[1]" refers to the fitted synthetic n emis/ha.
+# synN_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synN_proj_w[1] 
+# synN_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synN_proj_s[1] 
+# synN_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synN_proj_c[1] 
+# synN_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synN_proj_n[1] 
+# synN_emis_p <- rbind(synN_emis_p_e, synN_emis_p_w, synN_emis_p_s, synN_emis_p_c, synN_emis_p_n)
+# 
+# f_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * fuel_proj_e[1] # results in fuel emissions in Gg CO2e. "fuel_proj_e[1]" refers to the fitted  fuel emis/ha.
+# f_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * fuel_proj_w[1] 
+# f_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * fuel_proj_s[1] 
+# f_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * fuel_proj_c[1] 
+# f_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * fuel_proj_n[1]
+# f_emis_p <- rbind(f_emis_p_e, f_emis_p_w,f_emis_p_s,f_emis_p_c, f_emis_p_n)
+# 
+# p_emis_p_e <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * pest_proj_e[1] * tons_kg * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_proj_e[1]" refers to the fitted pesticides emis/ha.
+# p_emis_p_w <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * pest_proj_w[1] * pest_ef  * tons_to_Gg
+# p_emis_p_s <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * pest_proj_s[1]  * pest_ef  * tons_to_Gg
+# p_emis_p_c <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * pest_proj_c[1] * pest_ef  * tons_to_Gg 
+# p_emis_p_n <- as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * pest_proj_n[1]  * pest_ef  * tons_to_Gg
+# p_emis_p <- rbind(p_emis_p_e , p_emis_p_w,p_emis_p_s,p_emis_p_c ,p_emis_p_n)
+# 
+# proj_emis <- cbind(synNuse_emis_p, synN_emis_p,f_emis_p, p_emis_p) #emissions are in Gigagrams for each region of Africa
+# rownames(proj_emis) <- c("East", "West", "South", "Central", "North")
+# colnames(proj_emis) <- c("synN_use_proj", "synN_proj", "fuel_proj", "pest_proj")
+# 
+# #High_alt
+# synNuse_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synNuse_h_alt_e[1] * fert_ef * kg_to_Gg # results in manufacturing emissions for nitrogen fertilizers in Gg CO2e. "synNuse_h_alt_e[1]" refers to the fitted synthetic n use/ha.
+# synNuse_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synNuse_h_alt_w[1] * fert_ef * kg_to_Gg
+# synNuse_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synNuse_h_alt_s[1] * fert_ef * kg_to_Gg
+# synNuse_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synNuse_h_alt_c[1] * fert_ef * kg_to_Gg
+# synNuse_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synNuse_h_alt_n[1] * fert_ef * kg_to_Gg
+# synNuse_emis_h_alt <- rbind(synNuse_emis_h_alt_e, synNuse_emis_h_alt_w, synNuse_emis_h_alt_s, synNuse_emis_h_alt_c, synNuse_emis_h_alt_n) 
+# 
+# synN_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synN_h_alt_e[1] # results in syn nitrogen fertilizer emissions in Gg CO2e. "synNuse_h_alt_e[1]" refers to the fitted synthetic n emis/ha.
+# synN_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synN_h_alt_w[1] 
+# synN_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synN_h_alt_s[1] 
+# synN_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synN_h_alt_c[1] 
+# synN_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synN_h_alt_n[1] 
+# synN_emis_h_alt <- rbind(synN_emis_h_alt_e, synN_emis_h_alt_w, synN_emis_h_alt_s, synN_emis_h_alt_c, synN_emis_h_alt_n)
+# 
+# f_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * fuel_h_alt_e[1] # results in fuel emissions in Gg CO2e. "fuel_h_alt_e" refers to the fitted  fuel emis/ha.
+# f_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * fuel_h_alt_w[1] 
+# f_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * fuel_h_alt_s[1] 
+# f_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * fuel_h_alt_c[1] 
+# f_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * fuel_h_alt_n[1] 
+# f_emis_h_alt <- rbind(f_emis_h_alt_e, f_emis_h_alt_w,f_emis_h_alt_s,f_emis_h_alt_c, f_emis_h_alt_n)
+# 
+# p_emis_h_alt_e <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * pest_h_alt_e[1] * pest_ef  * tons_to_Gg # results in pesticides manufacturing emissions in Gg CO2e. "pest_h_alt_e[1]" refers to the fitted pesticides emis/ha for east Africa.
+# p_emis_h_alt_w <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * pest_h_alt_w[1]   * pest_ef  * tons_to_Gg
+# p_emis_h_alt_s <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * pest_h_alt_s[1]  * pest_ef  * tons_to_Gg
+# p_emis_h_alt_c <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * pest_h_alt_c[1] * pest_ef  * tons_to_Gg 
+# p_emis_h_alt_n <- as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * pest_h_alt_n[1] * pest_ef  * tons_to_Gg
+# p_emis_h_alt <- rbind(p_emis_h_alt_e , p_emis_h_alt_w, p_emis_h_alt_s, p_emis_h_alt_c , p_emis_h_alt_n)
+# 
+# h_alt_emis <- cbind(synNuse_emis_h_alt,synN_emis_h_alt,f_emis_h_alt, p_emis_h_alt)
+# rownames(h_alt_emis) <- c("East", "West", "Southern", "Central", "North")
+# colnames(h_alt_emis) <- c("synN_use_h_alt", "synN_h_alt", "fuel_h_alt", "pest_h_alt")
+#  
+# #Save emissions for each scenario in a .csv file
+# emissions <- cbind(baseline_emis, proj_emis, h_alt_emis )  # in gigagrams
+# 
+# #Fertilizer and pesticides application rate for Africa for each scenario
+# #High_alt scenario
+# cropland_high_afr <- colSums(area_h_alt[c(1:5),1]) #add up the regional cropland areas, the "Africa" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
+# synNuse_high_afr <- (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * synNuse_h_alt_e[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * synNuse_h_alt_w[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * synNuse_h_alt_s[1]) +(as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * synNuse_h_alt_c[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * synNuse_h_alt_n[1])
+# synNuse_ha_h_afr <- synNuse_high_afr/cropland_high_afr
+# 
+# #Proj Scenario
+# cropland_p_afr <- colSums(area_p[c(1:5),1]) #add up the regional cropland areas, the "Afria" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
+# synNuse_p_afr <- (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * synNuse_proj_e[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * synNuse_proj_w[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * synNuse_proj_s[1]) +(as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * synNuse_proj_c[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * synNuse_proj_n[1])
+# synNuse_ha_p_afr <- synNuse_p_afr/cropland_p_afr
+# 
+# #Baseline
+# cropland_b_afr <- colSums(area_b[c(1:5),1]) #add up the regional cropland areas, the "Afria" cropland is not the same as the individual cropland areas added together (might be because our analysis excludes a few countries due to data availability)
+# synNuse_b_afr <- (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * synNuse_b_e[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * synNuse_b_w[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * synNuse_b_s[1]) +(as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * synNuse_b_c[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * synNuse_b_n[1])
+# synNuse_ha_b_afr <- synNuse_b_afr/cropland_b_afr
+# 
+# #Pesticides application Africa
+# #high
+# p_h_afr <- (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "East"]))) * pest_h_alt_e[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "West"]))) * pest_h_alt_w[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "South"]))) * pest_h_alt_s[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "Central"]))) * pest_h_alt_c[1]) + (as.numeric(matrix(unlist(area_h_alt$harv_area[area_h_alt$region == "North"]))) * pest_h_alt_n[1])
+# p_ha_h_afr <- p_h_afr/cropland_high_afr
+# #proj
+# pest_p_afr <- (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "East"]))) * pest_proj_e[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "West"]))) * pest_proj_w[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "South"]))) * pest_proj_s[1]) +(as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "Central"]))) * pest_proj_c[1]) + (as.numeric(matrix(unlist(area_p$harv_area[area_p$region == "North"]))) * pest_proj_n[1])
+# pest_ha_p_afr <- pest_p_afr/cropland_p_afr
+# #b
+# pest_b_afr <- (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "East"]))) * pest_b_e[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "West"]))) * pest_b_w[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "South"]))) * pest_b_s[1]) +(as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "Central"]))) * pest_b_c[1]) + (as.numeric(matrix(unlist(area_b$harv_area[area_b$region == "North"]))) * pest_b_n[1])
+# pest_ha_b_afr <- pest_b_afr/cropland_b_afr
+
 ```
 
 
 ```{r Set up OLS for Machinery Emissions}
 
 #Calculate Energy Embodied in Machinery Emissions 
-machinery_energy <- read_csv("~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/raw_data/Machinery_Emissions.csv")
+machinery_energy <- read_csv("Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/raw_data/Machinery_Emissions.csv")
 #units for all fuel and energy sources listed under the item column is in Terajoules
 #machinery_energy <- Machinery_Emissions
 machinery_energy <- machinery_energy %>%
