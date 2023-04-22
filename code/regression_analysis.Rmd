@@ -14,303 +14,194 @@ library(jtools)
 library(ggstance)
 library(tidyverse)
 library(janitor)
-library(reshape2)
 library(naniar)
 library(reshape)
 library(wesanderson)
 ```
 
 ```{r Read in Data}
-#Inputs data
-pest_fuel_use_fert_emis <- read_csv("raw_data/faostat/pesticide_and_fuel_use_and_fertilizer_emissions.csv")
-#FAOSTAT data is in long format, contains data on all countries and years on synthetic fertilizer emissons (Gg), pesticide application (tons) and energy use emissions (Gg)
+#pesticide use
+pest_use <- read_csv("raw_data/faostat/pest_use.csv") %>% select(Country = Area, Year, pest_use = Value)
+#units: tonnes use in country inc. all herbicides, insecticide, fungicide etc. timeframe: 1990-2020
 
-syn_N_use <-read_csv("raw_data/faostat/fertilizer_use.csv")
-#FAOSTAT data is in long format, contains info on all countries and years on synthetic fertilizer application (kg)
+#on-farm energy use emissions - converting to CO2e and subtracting fisheries energy emissions from total on-farm energy emissions
+energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>% 
+  pivot_wider(names_from = Element, values_from = Value) %>% 
+  mutate(tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  #multiply by AR5 GWP values FAO uses
+  select(Country = Area, Year, tot_co2e, Item) %>% distinct() %>%  #remove duplicates of Bhutan, Hong Kong and several other countries 
+  pivot_wider(names_from = Item, values_from = tot_co2e) %>% 
+  mutate(en_emiss = `Total Energy` -coalesce(`Energy used in fishery`,0)) %>%  #calculate farm emissions as total - fishery 
+  mutate(en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
+  select(Country, Year, en_emiss)
+#units: kilotonnes (i.e. gigagram) CO2e.  timeframe: 1970-2020
 
-syn_N_use[syn_N_use == 0] <- NA #0's are likely missing data
-colnames(syn_N_use) <- c("Country", "Year", "Syn_N_use")
+#fertilizer application emissions
+fert_emiss <- read_csv("raw_data/faostat/fert_use_emissions.csv") %>% select(Country = Area, Year, fert_emiss = Value)
+#units: kilotonnes (i.e. gigagram) CO2e, using AR5 GWP. timeframe: 1961-2020
+
+#synthetic fertilizer use and use per ha cropland
+fert_use_per_ha <- read_csv("raw_data/faostat/fert_use_per_ha_cropland.csv") %>% select(Country = Area, Year, fert_use_ha = Value)
+#N use per ha of cropland. units: kg nutrient N/ha timeframe: 1961-2020
+
+fert_use <- read_csv("raw_data/faostat/fert_use.csv") %>% select(Country = Area, Year, fert_use = Value) %>% mutate(fert_use= fert_use*1000)
+#N agricultural use. units: convert from original units of tonnes N to kg N. timeframe: 1961-2020
 
 #Yield and Cropland Data from calculate_calories_per_cropland.Rmd
 prod <- read_csv("int_data/prod.cropland.csv")
-
-Yield <- prod[, c(1,2,5)]
-Cropland <- prod[, c(1,2,4)]
-Production <- prod[,c(1,2,3)]
 ```
-
 
 ```{r Calculate total fuel emissions, calculate emissions per ha for each input }
-#join dataframes on input use, production, and cropland
-reg <- spread(pest_fuel_use_fert_emis, key = Item, value = Value) #convert data to wide format 
-reg <- inner_join(reg, prod, by = c("Country" = "country", "Year" = "year")) %>% inner_join(syn_N_use) 
-
-#Determine number of negative and 0 values for inputs
-nrow(reg[reg$`Energy used in fishery`<= 0, ]) 
-nrow(reg[reg$`Nutrient nitrogen N (total)` <= 0, ]) 
-nrow(reg[reg$`Pesticides (total)` <= 0, ]) 
-nrow(reg[reg$`Synthetic Nitrogen fertilizers` <= 0, ]) 
-nrow(reg[reg$`Total Energy` <= 0, ]) 
-nrow(reg[reg$`Transport fuel used in agriculture (excl. fishery)` <= 0, ])
-nrow(reg[reg$Syn_N_use <= 0, ])
-
-#Replace negative and 0 values with NA
-reg[reg <= 0] <- NA #change to less than or equal to remove negative values for transportation fuel
-
+#join datasets
+reg <- full_join(energy_emiss, fert_emiss) %>% full_join(fert_use) %>% full_join(fert_use_per_ha) %>% full_join(pest_use) %>% full_join(prod, by =  c("Country" = "country", "Year" = "year"))
 
 #Fill in missing data for each column by country. Apply the last one carried forward method to each column in the dataframe (called reg below), grouping by country so that if the first observation is NA, the function doesn't replace with observation from different country. Will not fill in data for previous years.
-reg <-  reg %>% group_by(Country) %>% mutate(`Energy used in fishery` = na.locf(`Energy used in fishery`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Nutrient nitrogen N (total)` = na.locf(`Nutrient nitrogen N (total)`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Pesticides (total)` = na.locf(`Pesticides (total)`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Synthetic Nitrogen fertilizers` = na.locf(`Synthetic Nitrogen fertilizers`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Total Energy` = na.locf(`Total Energy`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(`Transport fuel used in agriculture (excl. fishery)` = na.locf(`Transport fuel used in agriculture (excl. fishery)`, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(tot_kcal = na.locf(tot_kcal, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(cropland = na.locf(cropland, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(kcal_ha = na.locf(kcal_ha, na.rm = FALSE))
-reg <-  reg %>% group_by(Country) %>% mutate(Syn_N_use = na.locf(Syn_N_use, na.rm = FALSE))
-
-#Calculate total fuel applied from on farm sources, subtract emissions from fisheries and transportation, ignoring NAs in fisheries and transportation but not in total energy
-reg$Fuel.emissions <- ifelse(!is.na(reg$`Total Energy`), reg$`Total Energy` - rowSums(reg[,c("Energy used in fishery","Transport fuel used in agriculture (excl. fishery)")], na.rm=TRUE), NA)
-
-#Cropland units are per 1000 ha, so multiply cropland values by 1000
-reg$cropland <- reg$cropland * 1000 
+reg <- reg %>% group_by(Country) %>% arrange(Country, Year) %>% fill(en_emiss:cropland)
 
 #Calculate each emissions or input use per ha 
-reg$Fuel_ha <-reg$Fuel.emissions/reg$cropland #units are gigagrams/ha
-reg$P_ha <- reg$`Pesticides (total)`/reg$cropland #units are tons applied/ha
-reg$synN_use_ha <- reg$Syn_N_use/reg$cropland #units are kg applied/ha       
-reg$SynN_ha <- reg$`Synthetic Nitrogen fertilizers`/reg$cropland#units are gigagrams/ha
+reg$en_emiss_ha <-reg$en_emiss/reg$cropland #units are gigagrams/ha
+reg$p_ha <- reg$pest_use/reg$cropland #units are tons applied/ha
+reg$fert_emiss_ha <- reg$fert_emiss/reg$cropland#units are gigagrams/ha
 
 #reg calc yield
-reg$yield <-  reg$`tot_kcal`/reg$cropland
-plot(reg$yield, reg$SynN_ha, main = "Yield vs. Syn N emissions per ha")
-plot(reg$yield, reg$synN_use_ha, main = "Yield vs. Syn N yse per ha (manufacturing)")
-plot(reg$yield, reg$Fuel_ha, main = "Yield vs. On farm fuel emissions per ha")
-plot(reg$yield, reg$P_ha, main = "Yield vs. Pesticides use per ha")
-
+reg$yield <-  reg$tot_kcal/reg$cropland
+plot(reg$yield, reg$fert_emiss_ha, main = "Yield vs. Syn N emissions per ha")
+plot(reg$yield, reg$fert_use_ha, main = "Yield vs. Syn N use per ha")
+plot(reg$yield, reg$en_emiss_ha, main = "Yield vs. On farm fuel emissions per ha")
+plot(reg$yield, reg$p_ha, main = "Yield vs. Pesticides use per ha")
 ```
 
-
 ```{r Clean Data }
-
 reg <-  clean_names(reg)  #makes all names lower case
 
 #Determine if all yield values are non-zero
-nrow(reg) #9650
-sum(reg$production_kcal !=  0) #returns 9650 which is equivalent to number of obs in reg #dataframe
-sum(reg$cropland_ha !=  0) #returns 9650 which is equivalent to number of obs in reg dataframe
+sum(reg$tot_kcal ==  0, na.rm=T) #none zero
+sum(reg$cropland ==  0, na.rm=T) #none zero
 
-print("number duplicated")
+#check for duplicate rows
 get_dupes(reg, country, year) # no duplicates found
 
-#count fuel emissions per ha observations by country
-count_by_country <- reg %>% 
-dplyr::group_by(country) %>% 
- dplyr::summarize(count = sum(is.na(fuel_ha)==FALSE))
-count_by_country
-one.value <- unique(count_by_country$count)
-one.value #if there is only 1 unique value in the count column then all countries have the #same number of obs, if countries have different numbers of observations, returns an #unbalanced panel dataset 
-
-# count pesticide observations by country
-count_by_country <-reg %>% 
-  dplyr::group_by(country) %>% 
-  dplyr::summarize(count = sum(is.na(p_ha)==FALSE))
-count_by_country
-one.value <- unique(count_by_country$count)
-one.value #if there is only 1 unique value in the count column then all countries have the same number of obs, if countries have different numbers of observations, returns an unbalanced panel dataset 
-
-# count synthetic N per hectare observations by country
-count_by_country <-reg %>% 
-  dplyr::group_by(country) %>% 
-  dplyr::summarize(count = sum(is.na(syn_n_ha)==FALSE))
-count_by_country
-one.value <- unique(count_by_country$count) #if there is only 1 unique value in the count column then all countries have the same number of obs, unbalanced panel
+#count fuel emissions per ha, pesticide, and synthetic N observations by country
+reg %>% group_by(country) %>% summarize(count = sum(is.na(en_emiss_ha)==FALSE)) 
+reg %>% group_by(country) %>% summarize(count = sum(is.na(p_ha)==FALSE))
+reg %>% group_by(country) %>% summarize(count = sum(is.na(fert_emiss_ha)==FALSE))
+#results indicate different number of obs per country, an unbalanced panel dataset
 
 #Convert 0's to NA's  - Not likely that a country has 0 fertilizer or fuel use if production and cropland  values are all non-zero. Likely that the "0" is missing data. These false 0's might influence regression estimates. All 0's will be converted to NAs and the regression will automatically eliminate all NAs. 
 reg <- naniar::replace_with_na_all(data = reg, condition = ~.x == 0)
 
 #Graph data to inspect for outliers
-plot(reg$production_kcal/reg$cropland_ha, reg$syn_n_use_ha) 
-boxplot(reg$syn_n_use_ha)
+boxplot(reg$fert_use_ha)
+boxplot(reg$p_ha) #visual representation of data points and outliers. #values are generally within 0.137 tons P/ha maximum (from World Bank) ; 5698 values are NA
+plot(reg$yield, reg$en_emiss_ha) #there are some values for which yields are 0 but fuel emissions per ha is above 0.010 Gg/ha, values that are higher than 0.015 Gg/ha are all from Singapore, everything else is lower than 0.010
+boxplot(reg$en_emiss_ha) #429 outliers
 
-plot(reg$production_kcal/reg$cropland_ha, reg$p_ha) #values are within 0.137 tons P/ha maximum (from World Bank) ; 5698 values are NA
-boxplot(reg$p_ha) #visual representation of data points and outliers
+plot(reg$production_kcal/reg$cropland_ha, reg$fert_emiss_ha) #some high values have nearly 0 yields,  2012 values are NA, values are lower in magnitude 
+boxplot(reg$fert_emiss_ha)
+ggplot(reg) + geom_density(aes(fert_emiss_ha))
 
-plot(reg$production_kcal/reg$cropland_ha, reg$fuel_ha) #there are some values for which yields are 0 but fuel emissions per ha is above 0.010 Gg/ha, values that are higher than 0.015 Gg/ha are all from Singapore, everything else is lower than 0.010
-boxplot(reg$fuel_ha) #429 outliers
+#remove countries with many substantial and unexplainable outlier values
+outlier_en_countries <- reg %>% filter(en_emiss_ha>=0.15) %>% distinct(country) %>% pull() 
+outlier_p_countries <- reg %>% filter(p_ha>=0.1) %>% distinct(country) %>% pull() 
+reg <- reg %>% filter(!country %in% c(outlier_en_countries, outlier_p_countries))
 
-plot(reg$production_kcal/reg$cropland_ha, reg$syn_n_ha) #some high values have nearly 0 yields,  2012 values are NA, values are lower in magnitude 
-boxplot(reg$syn_n_ha)
-ggplot(reg) + geom_density(aes(syn_n_ha))
-
-clean_reg <- reg
-write_csv(clean_reg, path  ="~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg.csv")
-
+reg
+write_csv(reg, "int_data/reg.csv")
 ```
-
 
 ```{r Aggregate African countries data by region} 
 
 #Subset by regions
+#Member countries within each region are from the UN Statistics division : https://unstats.un.org/unsd/methodology/m49/overview/
+country_groupings <- readxl::read_excel("raw_data/UNSD — Methodology.xlsx")
 
-#Member Countres within each region are from UN-NEPAD Africa Ag report and UN Statistics Classification: https://www.un.org/en/africa/osaa/pdf/pubs/2013africanagricultures.pdf
+Africa <- country_groupings %>% filter(`Region Name`=="Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+W_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Western Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+E_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Eastern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+C_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Middle Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+S_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Southern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+N_Afr <- country_groupings %>% filter(`Sub-region Name`=="Northern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
 
- W_Afr <- c("Benin","Burkina Faso","Côte d'Ivoire", "Cabo Verde", "Ghana", "Guinea", "Liberia", "Mali", "Niger", "Nigeria", "Senegal" ,"Sierra Leone",   "Gambia", "Togo")
-#Guinea-Bissau, Saint Helena, Western Sahara in FOFA. What FOFA calls Cape Verde, is Cabo #Verde in FAOSTAT. 
- E_Afr <- c("Ethiopia", "Ethiopia PDR", "Kenya" ,  "Madagascar" , "Mauritius","Rwanda", "Somalia", "United Republic of Tanzania", "Uganda")
-#Djibouti, South Sudan, Eritrea, Comoros, Reunion, Réunion, Mayotte, Seychelles not in FOFA
- C_Afr <- c("Burundi","Chad",  "Central African Republic", "Gabon","Democratic Republic of the Congo", "Cameroon")
- #FOFA does not have Sao Tome and Principe, Congo, Guinea-Bissau, or Equatorial Guinea. FOFA has "Republic of the Congo" whose equivalent in FAOSTAT is "Democratic Republic of the Congo"
- S_Afr <-c("Angola","Botswana", "Eswatini", "Lesotho", "Namibia", "South Africa", "Mozambique", "Malawi", "Zambia", "Zimbabwe" ) #FOFA uses old name for Eswatini which is Swaziland, but FAOSTAT uses Eswatini 
- N_Afr <-c("Algeria", "Egypt", "Morocco", "Tunisia","Mauritania")
-#No Western Sahara or Sudan(former) in FOFA, no Libya
+#define countries in Africa without matching names in faostat data in order to make names consistent for joining
+Africa[which(!Africa %in% unique(reg$country))]
+
+#match all possible, based on manual examination of faostat countries.  non-matching ones aren't listed separately in faostat
+reg$country <- recode(reg$country, "Côte d'Ivoire"="Côte d’Ivoire")
 
 #create new coumn with names as factors to revise
-clean_reg <- mutate(clean_reg, Country_rename = country)
+reg <- mutate(reg, Country_rename = country)
 
-# # recode African country names 
- clean_reg$Country_rename[clean_reg$Country_rename %in% E_Afr] <-  "E_Afr"
- clean_reg$Country_rename[clean_reg$Country_rename %in% W_Afr] <-  "W_Afr"
- clean_reg$Country_rename[clean_reg$Country_rename %in% C_Afr] <-  "C_Afr"
- clean_reg$Country_rename[clean_reg$Country_rename %in% S_Afr] <-  "S_Afr"
- clean_reg$Country_rename[clean_reg$Country_rename %in% N_Afr] <-  "N_Afr"
+# add region name for countries in african regions AND in list of africa countries included in FOFA. this ensures that later regressions are conducted such that the fixed effect for a region only includes countries that are in the region for which predictions are being made (i.e. FOFA projections for northern africa exclude libya)
+ reg$Country_rename[reg$Country_rename %in% E_Afr & reg$country %in% africa_scenario_countries] <-  "E_Afr"
+ reg$Country_rename[reg$Country_rename %in% W_Afr & reg$country %in% africa_scenario_countries] <-  "W_Afr"
+ reg$Country_rename[reg$Country_rename %in% C_Afr & reg$country %in% africa_scenario_countries] <-  "C_Afr"
+ reg$Country_rename[reg$Country_rename %in% S_Afr & reg$country %in% africa_scenario_countries] <-  "S_Afr"
+ reg$Country_rename[reg$Country_rename %in% N_Afr & reg$country %in% africa_scenario_countries] <-  "N_Afr"
  
 # #filter data by region
- clean_reg_E <- dplyr::filter(clean_reg,clean_reg$Country_rename == "E_Afr" )
- clean_reg_W <- dplyr::filter(clean_reg,clean_reg$Country_rename == "W_Afr" )
- clean_reg_C <- dplyr::filter(clean_reg,clean_reg$Country_rename == "C_Afr" )
- clean_reg_S <- dplyr::filter(clean_reg,clean_reg$Country_rename == "S_Afr" )
- clean_reg_N <- dplyr::filter(clean_reg,clean_reg$Country_rename == "N_Afr" )
+ reg_E <- dplyr::filter(reg,reg$Country_rename == "E_Afr" )
+ reg_W <- dplyr::filter(reg,reg$Country_rename == "W_Afr" )
+ reg_C <- dplyr::filter(reg,reg$Country_rename == "C_Afr" )
+ reg_S <- dplyr::filter(reg,reg$Country_rename == "S_Afr" )
+ reg_N <- dplyr::filter(reg,reg$Country_rename == "N_Afr" )
 ```
 
 ```{r Not necessary to run - amount of missing data}
 
  #Amount of missing data for E.Afica region
-# nrow(clean_reg_E[clean_reg_E$syn_n_ha == "NA",])/nrow(clean_reg_E) * 100 #1.5% are NAs
-# nrow(clean_reg_E[clean_reg_E$syn_n_use_ha == "NA",])/nrow(clean_reg_E) * 100 #1.5% are NAs
-# nrow(clean_reg_E[clean_reg_E$p_ha == "NA",])/nrow(clean_reg_E) * 100 #54% of data are NAs
-# nrow(clean_reg_E[clean_reg_E$fuel_ha == "NA",])/nrow(clean_reg_E) * 100 #67% are NAs
+# nrow(reg_E[reg_E$fert_emiss_ha == "NA",])/nrow(reg_E) * 100 #1.5% are NAs
+# nrow(reg_E[reg_E$fert_use_ha == "NA",])/nrow(reg_E) * 100 #1.5% are NAs
+# nrow(reg_E[reg_E$p_ha == "NA",])/nrow(reg_E) * 100 #54% of data are NAs
+# nrow(reg_E[reg_E$en_emiss_ha == "NA",])/nrow(reg_E) * 100 #67% are NAs
 # 
 # #Amount of missing data for W.Afica region
-# nrow(clean_reg_W[clean_reg_W$syn_n_ha == "NA",])/nrow(clean_reg_W) * 100 #4% are NAs
-# nrow(clean_reg_W[clean_reg_W$syn_n_use_ha == "NA",])/nrow(clean_reg_W) * 100 #4% are NAs
-# nrow(clean_reg_W[clean_reg_W$p_ha == "NA",])/nrow(clean_reg_W) * 100 #65% of data are NAs
-# nrow(clean_reg_W[clean_reg_W$fuel_ha == "NA",])/nrow(clean_reg_W) * 100 #75% are NAs
+# nrow(reg_W[reg_W$fert_emiss_ha == "NA",])/nrow(reg_W) * 100 #4% are NAs
+# nrow(reg_W[reg_W$fert_use_ha == "NA",])/nrow(reg_W) * 100 #4% are NAs
+# nrow(reg_W[reg_W$p_ha == "NA",])/nrow(reg_W) * 100 #65% of data are NAs
+# nrow(reg_W[reg_W$en_emiss_ha == "NA",])/nrow(reg_W) * 100 #75% are NAs
 # 
 # #Amount of missing data for C.Afica region
-# nrow(clean_reg_C[clean_reg_C$syn_n_ha == "NA",])/nrow(clean_reg_C) * 100 #6% are NAs
-# nrow(clean_reg_C[clean_reg_C$syn_n_use_ha == "NA",])/nrow(clean_reg_C) * 100 #6% are NAs
-# nrow(clean_reg_C[clean_reg_C$p_ha == "NA",])/nrow(clean_reg_C) * 100 #65% of data are NAs
-# nrow(clean_reg_C[clean_reg_C$fuel_ha == "NA",])/nrow(clean_reg_C) * 100 #86% data missing
+# nrow(reg_C[reg_C$fert_emiss_ha == "NA",])/nrow(reg_C) * 100 #6% are NAs
+# nrow(reg_C[reg_C$fert_use_ha == "NA",])/nrow(reg_C) * 100 #6% are NAs
+# nrow(reg_C[reg_C$p_ha == "NA",])/nrow(reg_C) * 100 #65% of data are NAs
+# nrow(reg_C[reg_C$en_emiss_ha == "NA",])/nrow(reg_C) * 100 #86% data missing
 # 
 # #Amount of missing data for S.Afica region
-# nrow(clean_reg_S[clean_reg_S$syn_n_ha == "NA",])/nrow(clean_reg_S) * 100 #8% are NAs
-# nrow(clean_reg_S[clean_reg_S$syn_n_use_ha == "NA",])/nrow(clean_reg_S) * 100 #8% are NAs
-# nrow(clean_reg_S[clean_reg_S$p_ha == "NA",])/nrow(clean_reg_S) * 100 #54% of data are NAs
-# nrow(clean_reg_S[clean_reg_S$fuel_ha == "NA",])/nrow(clean_reg_S) * 100  #62%
+# nrow(reg_S[reg_S$fert_emiss_ha == "NA",])/nrow(reg_S) * 100 #8% are NAs
+# nrow(reg_S[reg_S$fert_use_ha == "NA",])/nrow(reg_S) * 100 #8% are NAs
+# nrow(reg_S[reg_S$p_ha == "NA",])/nrow(reg_S) * 100 #54% of data are NAs
+# nrow(reg_S[reg_S$en_emiss_ha == "NA",])/nrow(reg_S) * 100  #62%
 # 
 # #Amount of missing data for N.Afica region
-# nrow(clean_reg_N[clean_reg_N$syn_n_ha == "NA",])/nrow(clean_reg_N) * 100 #5% are NAs
-# nrow(clean_reg_N[clean_reg_N$syn_n_use_ha == "NA",])/nrow(clean_reg_N) * 100 #5% are NAs
-# nrow(clean_reg_N[clean_reg_N$p_ha == "NA",])/nrow(clean_reg_N) * 100 #54% of data are NAs
-# nrow(clean_reg_N[clean_reg_N$fuel_ha == "NA",])/nrow(clean_reg_N) * 100  #35%
+# nrow(reg_N[reg_N$fert_emiss_ha == "NA",])/nrow(reg_N) * 100 #5% are NAs
+# nrow(reg_N[reg_N$fert_use_ha == "NA",])/nrow(reg_N) * 100 #5% are NAs
+# nrow(reg_N[reg_N$p_ha == "NA",])/nrow(reg_N) * 100 #54% of data are NAs
+# nrow(reg_N[reg_N$en_emiss_ha == "NA",])/nrow(reg_N) * 100  #35%
 ```
 
 ```{r Aggregate data for each region}
 
-clean_reg_E_aggregate <- clean_reg_E %>%
-  dplyr::select(year,cropland_ha,production_kcal, energy_used_in_fishery,pesticides_total, synthetic_nitrogen_fertilizers, total_energy, transport_fuel_used_in_agriculture_excl_fishery, fuel_emissions, syn_n_use) %>% 
-  dplyr::group_by(year) %>%
-  dplyr::summarise_all(sum, na.rm= TRUE)
+aggregate_reg <- function(region_data, region_name){
+  output <- region_data %>% select(year,cropland, tot_kcal, en_emiss, fert_use, pest_use, fert_emiss) %>% 
+  group_by(year) %>%
+  summarise_all(sum, na.rm= TRUE) #sum total values across region by year
+  
+  #calculate per hectare values
+  output <- output %>% mutate(yield = tot_kcal/cropland, en_emiss_ha = en_emiss/cropland, p_ha = pest_use/cropland, fert_emiss_ha = fert_emiss/cropland, fert_use_per_ha = fert_use/cropland, country = region_name)
+  
+  return(output)
+}
 
-clean_reg_W_aggregate <- clean_reg_W %>%
-  dplyr::select(year,cropland_ha,production_kcal, energy_used_in_fishery,pesticides_total, synthetic_nitrogen_fertilizers, total_energy, transport_fuel_used_in_agriculture_excl_fishery, fuel_emissions, syn_n_use) %>% 
-  dplyr::group_by(year) %>%
-  dplyr::summarise_all(sum, na.rm= TRUE)
-
-clean_reg_C_aggregate <- clean_reg_C %>%
-  dplyr::select(year,cropland_ha,production_kcal, energy_used_in_fishery,pesticides_total, synthetic_nitrogen_fertilizers, total_energy, transport_fuel_used_in_agriculture_excl_fishery, fuel_emissions, syn_n_use) %>% 
-  dplyr::group_by(year) %>%
-  dplyr::summarise_all(sum, na.rm= TRUE)
-
-clean_reg_S_aggregate <- clean_reg_S %>%
-  dplyr::select(year,cropland_ha,production_kcal, energy_used_in_fishery,pesticides_total, synthetic_nitrogen_fertilizers, total_energy, transport_fuel_used_in_agriculture_excl_fishery, fuel_emissions, syn_n_use) %>% 
-  dplyr::group_by(year) %>%
-  dplyr::summarise_all(sum, na.rm= TRUE)
-
-clean_reg_N_aggregate <- clean_reg_N %>%
-  dplyr::select(year,cropland_ha,production_kcal, energy_used_in_fishery,pesticides_total, synthetic_nitrogen_fertilizers, total_energy, transport_fuel_used_in_agriculture_excl_fishery, fuel_emissions, syn_n_use) %>% 
-  dplyr::group_by(year) %>%
-  dplyr::summarise_all(sum, na.rm= TRUE)
-
-#West Africa
-clean_reg_W_aggregate$yield <- clean_reg_W_aggregate$production_kcal/clean_reg_W_aggregate$cropland_ha
-clean_reg_W_aggregate$fuel_ha <- clean_reg_W_aggregate$fuel_emissions/clean_reg_W_aggregate$cropland_ha
-clean_reg_W_aggregate$p_ha <- clean_reg_W_aggregate$pesticides_total/clean_reg_W_aggregate$cropland_ha
-clean_reg_W_aggregate$syn_n_ha <- clean_reg_W_aggregate$synthetic_nitrogen_fertilizers/clean_reg_W_aggregate$cropland_ha
-clean_reg_W_aggregate$syn_n_use_ha <- clean_reg_W_aggregate$syn_n_use/clean_reg_W_aggregate$cropland_ha
-
-clean_reg_W_aggregate$country <- "West" #recode countries so data can be aggregated by region
-
-#Save West Africa only data to clean data folder
-#write_csv(clean_reg_W_aggregate, path  ="~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg_W_aggregate.csv")
-
-#East Africa
-clean_reg_E_aggregate$yield <- clean_reg_E_aggregate$production_kcal/clean_reg_E_aggregate$cropland_ha
-clean_reg_E_aggregate$fuel_ha <- clean_reg_E_aggregate$fuel_emissions/clean_reg_E_aggregate$cropland_ha
-clean_reg_E_aggregate$p_ha <- clean_reg_E_aggregate$pesticides_total/clean_reg_E_aggregate$cropland_ha
-clean_reg_E_aggregate$syn_n_ha <- clean_reg_E_aggregate$synthetic_nitrogen_fertilizers/clean_reg_E_aggregate$cropland_ha
-clean_reg_E_aggregate$syn_n_use_ha <- clean_reg_E_aggregate$syn_n_use/clean_reg_E_aggregate$cropland_ha
-
-clean_reg_E_aggregate$country <- "East" #recode countries so data can be aggregated by region
-
-#Save East Africa only data to clean data folder
-#write_csv(clean_reg_E_aggregate, path  ="~/Google Drive//My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg_e_aggregate.csv")
-
-#Save Central Africa only data to clean data folder
-clean_reg_C_aggregate$yield <- clean_reg_C_aggregate$production_kcal/clean_reg_C_aggregate$cropland_ha
-clean_reg_C_aggregate$fuel_ha <- clean_reg_C_aggregate$fuel_emissions/clean_reg_C_aggregate$cropland_ha
-clean_reg_C_aggregate$p_ha <- clean_reg_C_aggregate$pesticides_total/clean_reg_C_aggregate$cropland_ha
-clean_reg_C_aggregate$syn_n_ha <- clean_reg_C_aggregate$synthetic_nitrogen_fertilizers/clean_reg_C_aggregate$cropland_ha
-clean_reg_C_aggregate$syn_n_use_ha <- clean_reg_C_aggregate$syn_n_use/clean_reg_C_aggregate$cropland_ha
-
-clean_reg_C_aggregate$country <- "Central"#recode countries so data can be aggregated by region
-
-#Save Central Africa only data to clean data folder
-#write_csv(clean_reg_C_aggregate, path  ="~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg_C_aggregate.csv")
-
-#South Africa
-clean_reg_S_aggregate$yield <- clean_reg_S_aggregate$production_kcal/clean_reg_S_aggregate$cropland_ha
-clean_reg_S_aggregate$fuel_ha <- clean_reg_S_aggregate$fuel_emissions/clean_reg_S_aggregate$cropland_ha
-clean_reg_S_aggregate$p_ha <- clean_reg_S_aggregate$pesticides_total/clean_reg_S_aggregate$cropland_ha
-clean_reg_S_aggregate$syn_n_ha <- clean_reg_S_aggregate$synthetic_nitrogen_fertilizers/clean_reg_S_aggregate$cropland_ha
-clean_reg_S_aggregate$syn_n_use_ha <- clean_reg_S_aggregate$syn_n_use/clean_reg_S_aggregate$cropland_ha
-
-clean_reg_S_aggregate$country <- "South"  #recode countries so data can be aggregated by region
-
-#Save S Africa only data to clean data foldeer
-#write_csv(clean_reg_S_aggregate, path  ="~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg_S_aggregate.csv")
-
-#North Africa
-clean_reg_N_aggregate$yield <- clean_reg_N_aggregate$production_kcal/clean_reg_N_aggregate$cropland_ha
-clean_reg_N_aggregate$fuel_ha <- clean_reg_N_aggregate$fuel_emissions/clean_reg_N_aggregate$cropland_ha
-clean_reg_N_aggregate$p_ha <- clean_reg_N_aggregate$pesticides_total/clean_reg_N_aggregate$cropland_ha
-clean_reg_N_aggregate$syn_n_ha <- clean_reg_N_aggregate$synthetic_nitrogen_fertilizers/clean_reg_N_aggregate$cropland_ha
-clean_reg_N_aggregate$syn_n_use_ha <- clean_reg_N_aggregate$syn_n_use/clean_reg_N_aggregate$cropland_ha
-
-clean_reg_N_aggregate$country <- "North"  #recode countries so data can be aggregated by region
-
-#Save North Africa only data to clean data folder
-#write_csv(clean_reg_N_aggregate, path  ="~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/clean_data/clean_reg_N_aggregate.csv")
-
-
+reg_E_aggregate <- aggregate_reg(reg_E, "East")
+reg_W_aggregate <- aggregate_reg(reg_E, "West")
+reg_S_aggregate <- aggregate_reg(reg_E, "South")
+reg_N_aggregate <- aggregate_reg(reg_E, "North")
+reg_C_aggregate <- aggregate_reg(reg_E, "Central")
 ```
 
 #Regression Code
 ```{r Load in other countries' data and join it with African regions data}
 
-reg_other_country <- clean_reg
+reg_other_country <- reg
 
 #Filter out Africa data, keep non-Africa data 
 reg_other_country <- mutate(reg, Country_rename = country)
@@ -348,17 +239,17 @@ reg_other_country$yield <- reg_other_country$production_kcal/reg_other_country$c
 
 #Join Africa data with all of the countries' (non Africa) data
 reg_other_country <- reg_other_country %>%
-  dplyr::select(country,year, energy_used_in_fishery, synthetic_nitrogen_fertilizers,syn_n_use,  total_energy, transport_fuel_used_in_agriculture_excl_fishery,pesticides_total, fuel_emissions,fuel_ha, p_ha, syn_n_ha,syn_n_use_ha, yield,production_kcal, cropland_ha)
+  dplyr::select(country,year, energy_used_in_fishery, synthetic_nitrogen_fertilizers,fert_use,  total_energy, transport_fuel_used_in_agriculture_excl_fishery,pesticides_total, fuel_emissions,en_emiss_ha, p_ha, fert_emiss_ha,fert_use_ha, yield,production_kcal, cropland_ha)
 
-reg_all_countries <- dplyr::full_join(reg_other_country, clean_reg_W_aggregate) 
+reg_all_countries <- dplyr::full_join(reg_other_country, reg_W_aggregate) 
 
-reg_all_countries <- dplyr::full_join(reg_all_countries, clean_reg_E_aggregate)  
+reg_all_countries <- dplyr::full_join(reg_all_countries, reg_E_aggregate)  
 
-reg_all_countries <- dplyr::full_join(reg_all_countries, clean_reg_S_aggregate)
+reg_all_countries <- dplyr::full_join(reg_all_countries, reg_S_aggregate)
 
-reg_all_countries <- dplyr::full_join(reg_all_countries , clean_reg_C_aggregate)
+reg_all_countries <- dplyr::full_join(reg_all_countries , reg_C_aggregate)
 
-reg_all_countries <- dplyr::full_join(reg_all_countries , clean_reg_N_aggregate) 
+reg_all_countries <- dplyr::full_join(reg_all_countries , reg_N_aggregate) 
 
 ```
 
@@ -390,10 +281,10 @@ hist(reg_all_countries$synthetic_nitrogen_fertilizers,
   main = "Histogram of fuel",
   breaks = sqrt(nrow(reg_all_countries)))
 
-summary(reg_all_countries$syn_n_use)
-boxplot(reg_all_countries$syn_n_use)
-hist(reg_all_countries$syn_n_use,
-  xlab = "syn_n_use",
+summary(reg_all_countries$fert_use)
+boxplot(reg_all_countries$fert_use)
+hist(reg_all_countries$fert_use,
+  xlab = "fert_use",
   main = "Histogram of fuel",
   breaks = sqrt(nrow(reg_all_countries)))
 
@@ -414,19 +305,19 @@ hist(reg_all_countries$fuel_emissions,
 #temp[is.na(temp)] <- 0
 #world_reg <- temp %>% group_by(year) %>% summarise(across(-country, sum))
 #world_reg$yield <- world_reg$production_kcal/world_reg$cropland_ha
-#world_reg$fuel_ha <- world_reg$fuel_emissions/world_reg$cropland_ha
+#world_reg$en_emiss_ha <- world_reg$fuel_emissions/world_reg$cropland_ha
 #world_reg$p_ha <- world_reg$pesticides_total/world_reg$cropland_ha
-#world_reg$syn_n_ha <- world_reg$synthetic_nitrogen_fertilizers/world_reg$cropland_ha
-#world_reg$syn_n_use_ha <- world_reg$syn_n_use/world_reg$cropland_ha
+#world_reg$fert_emiss_ha <- world_reg$synthetic_nitrogen_fertilizers/world_reg$cropland_ha
+#world_reg$fert_use_ha <- world_reg$fert_use/world_reg$cropland_ha
 #world_reg$country <- "World"
 #world_reg[world_reg == 0] <- NA
 #filter_reg_2 <- full_join(filter_reg, world_reg)
 
 #Sensitivity , increase fertilizer data by 3X
 # filter_reg$synthetic_nitrogen_fertilizers <- filter_reg$synthetic_nitrogen_fertilizers  * 3
-# filter_reg$syn_n_use <- filter_reg$syn_n_use * 3
-# filter_reg$syn_n_ha <- filter_reg$synthetic_nitrogen_fertilizers/filter_reg$cropland_ha
-# filter_reg$syn_n_use_ha <- filter_reg$syn_n_use/filter_reg$cropland_ha
+# filter_reg$fert_use <- filter_reg$fert_use * 3
+# filter_reg$fert_emiss_ha <- filter_reg$synthetic_nitrogen_fertilizers/filter_reg$cropland_ha
+# filter_reg$fert_use_ha <- filter_reg$fert_use/filter_reg$cropland_ha
 
 #Pesticides Use OLS regression
 p.ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country))
@@ -435,36 +326,36 @@ p.ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country))
 
 
 #Fuel Emissions OLS Regression
-filter_f_reg <- filter(filter_reg, filter_reg$fuel_ha > 0)
-fuel.ols <- lm(filter_f_reg , formula = log(fuel_ha) ~ log(yield) + factor(country))
-#filter_f_reg_2 <- filter(filter_reg_2, filter_reg_2$fuel_ha > 0)
-#fuel.ols <- lm(filter_f_reg_2 , formula = log(fuel_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
-#fuel.ols <- lm(filter_f_reg_2 , formula = log(fuel_ha) ~ log(yield) + factor(country))
+filter_f_reg <- filter(filter_reg, filter_reg$en_emiss_ha > 0)
+fuel.ols <- lm(filter_f_reg , formula = log(en_emiss_ha) ~ log(yield) + factor(country))
+#filter_f_reg_2 <- filter(filter_reg_2, filter_reg_2$en_emiss_ha > 0)
+#fuel.ols <- lm(filter_f_reg_2 , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
+#fuel.ols <- lm(filter_f_reg_2 , formula = log(en_emiss_ha) ~ log(yield) + factor(country))
 
-#filter_f_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$fuel_ha > 0)
-#fuel.ols <- lm(filter_f_reg_yrs , formula = log(fuel_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
+#filter_f_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$en_emiss_ha > 0)
+#fuel.ols <- lm(filter_f_reg_yrs , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Global yield sensitivity 
 
 
 #Synthetic N emissions OLS Regression 
-filter_syn_reg <- filter(filter_reg, filter_reg$syn_n_ha > 0)
-syn_n.ols <- lm(filter_syn_reg, formula = log(syn_n_ha) ~ log(yield) + factor(country)) #no #outliers in boxplot
+filter_syn_reg <- filter(filter_reg, filter_reg$fert_emiss_ha > 0)
+syn_n.ols <- lm(filter_syn_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #no #outliers in boxplot
 
-#filter_syn_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$syn_n_ha > 0)
-#syn_n.ols <- lm(filter_syn_reg_yrs, formula = log(syn_n_ha) ~ log(yield) + factor(country))
+#filter_syn_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$fert_emiss_ha > 0)
+#syn_n.ols <- lm(filter_syn_reg_yrs, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
 
 #Global yield sensitivity 
-#filter_syn_reg_2 <- filter(filter_reg_2, filter_reg_2$syn_n_ha > 0)
-#syn_n.ols <- lm(filter_syn_reg_2, formula = log(syn_n_ha) ~ log(yield) + factor(country))
+#filter_syn_reg_2 <- filter(filter_reg_2, filter_reg_2$fert_emiss_ha > 0)
+#syn_n.ols <- lm(filter_syn_reg_2, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
 
 #Synthetic N use or application OLS regression
-filter_syn_n_use_reg <- filter(filter_reg, filter_reg$syn_n_use_ha > 0)
-syn_n_use.ols <- lm(filter_syn_n_use_reg, formula = log(syn_n_use_ha) ~ log(yield) + factor(country))
+filter_fert_use_reg <- filter(filter_reg, filter_reg$fert_use_ha > 0)
+fert_use.ols <- lm(filter_fert_use_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))
 
-#filter_syn_n_use_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$syn_n_use_ha > 0)
-#syn_n_use.ols <- lm(filter_syn_n_use_reg_yrs, formula = log(syn_n_use_ha) ~ log(yield) + factor(country))
+#filter_fert_use_reg_yrs <- filter(filter_reg_yrs, filter_reg_yrs$fert_use_ha > 0)
+#fert_use.ols <- lm(filter_fert_use_reg_yrs, formula = log(fert_use_ha) ~ log(yield) + factor(country))
 #Global yield sensitivity 
-#filter_syn_n_use_reg_2 <- filter(filter_reg_2, filter_reg_2$syn_n_use_ha > 0)
-#syn_n_use.ols <- lm(filter_syn_n_use_reg_2, formula = log(syn_n_use_ha) ~ log(yield) + factor(country))
+#filter_fert_use_reg_2 <- filter(filter_reg_2, filter_reg_2$fert_use_ha > 0)
+#fert_use.ols <- lm(filter_fert_use_reg_2, formula = log(fert_use_ha) ~ log(yield) + factor(country))
 
 ```
 
@@ -523,9 +414,9 @@ h_alt_a <- h_alt %>% filter(region=="Africa") %>% select(yield, country = region
 # synN_p <- exp(predict(syn_n.ols, newdata  = p, interval = "confidence", level = 0.95))
 # synN_h <- exp(predict(syn_n.ols, newdata  = h_alt, interval = "confidence", level = 0.95))
 # 
-# synNuse_b <- exp(predict(syn_n_use.ols, newdata  = b, interval = "confidence", level = 0.95))
-# synNuse_p <- exp(predict(syn_n_use.ols, newdata  = p, interval = "confidence", level = 0.95))
-# synNuse_h <- exp(predict(syn_n_use.ols, newdata  = h_alt, interval = "confidence", level = 0.95))
+# synNuse_b <- exp(predict(fert_use.ols, newdata  = b, interval = "confidence", level = 0.95))
+# synNuse_p <- exp(predict(fert_use.ols, newdata  = p, interval = "confidence", level = 0.95))
+# synNuse_h <- exp(predict(fert_use.ols, newdata  = h_alt, interval = "confidence", level = 0.95))
 # 
 # #calculate input use and emissions for each scenario for the world
 # area_b <- regions_scenario_linus %>% dplyr::select(harv_area, scenario) %>% filter(scenario == "b")
@@ -609,67 +500,67 @@ fuel_b_e <- exp(predict(fuel.ols, newdata  = b_e, interval = "confidence", level
 fuel_proj_e <- exp(predict(fuel.ols, newdata  = p_e,  interval = "confidence", level = 0.95))
 fuel_h_alt_e <- exp(predict(fuel.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95))
 
-fuel_ha_E <- rbind(fuel_b_e, fuel_proj_e ,  fuel_h_alt_e)
-colnames(fuel_ha_E) <- c("fit_fuel_ha_e","lwr_fuel_ha_e", "upr_fuel_ha_e")
+en_emiss_ha_E <- rbind(fuel_b_e, fuel_proj_e ,  fuel_h_alt_e)
+colnames(en_emiss_ha_E) <- c("fit_en_emiss_ha_e","lwr_en_emiss_ha_e", "upr_en_emiss_ha_e")
 
 #Make predictions on fuel emissions for each scenario for West Africa
 fuel_b_w <- exp(predict(fuel.ols, newdata  = b_w, interval = "confidence", level = 0.95))
 fuel_proj_w <- exp(predict(fuel.ols, newdata  = p_w,  interval = "confidence", level = 0.95))
 fuel_h_alt_w <- exp(predict(fuel.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95))
 
-fuel_ha_W <- rbind(fuel_b_w, fuel_proj_w , fuel_h_alt_w)
-colnames(fuel_ha_W) <- c("fit_fuel_ha_w","lwr_fuel_ha_w", "upr_fuel_ha_w")
+en_emiss_ha_W <- rbind(fuel_b_w, fuel_proj_w , fuel_h_alt_w)
+colnames(en_emiss_ha_W) <- c("fit_en_emiss_ha_w","lwr_en_emiss_ha_w", "upr_en_emiss_ha_w")
 
 #Make predictions on fuel emissions for each scenario for South Africa
 fuel_b_s <- exp(predict(fuel.ols, newdata  = b_s, interval = "confidence", level = 0.95))
 fuel_proj_s <- exp(predict(fuel.ols, newdata  = p_s,  interval = "confidence", level = 0.95))
 fuel_h_alt_s <- exp(predict(fuel.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95))
 
-fuel_ha_S <- rbind(fuel_b_s  , fuel_proj_s ,  fuel_h_alt_s)
-colnames(fuel_ha_S) <- c("fit - fuel_ha_s","lwr - fuel_ha_s", "upr)fuel_ha_s")
+en_emiss_ha_S <- rbind(fuel_b_s  , fuel_proj_s ,  fuel_h_alt_s)
+colnames(en_emiss_ha_S) <- c("fit - en_emiss_ha_s","lwr - en_emiss_ha_s", "upr)en_emiss_ha_s")
 
 #Make predictions on fuel emissions for each scenario for Central Africa
 fuel_b_c <- exp(predict(fuel.ols, newdata  = b_c, interval = "confidence", level = 0.95))
 fuel_proj_c <- exp(predict(fuel.ols, newdata  = p_c,  interval = "confidence", level = 0.95))
 fuel_h_alt_c <- exp(predict(fuel.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95))
 
-fuel_ha_C <- rbind(fuel_b_c , fuel_proj_c ,  fuel_h_alt_c)
-colnames(fuel_ha_C) <- c("fit_fuel_ha_c","lwr_fuel_ha_c", "upr_fuel_ha_c")
+en_emiss_ha_C <- rbind(fuel_b_c , fuel_proj_c ,  fuel_h_alt_c)
+colnames(en_emiss_ha_C) <- c("fit_en_emiss_ha_c","lwr_en_emiss_ha_c", "upr_en_emiss_ha_c")
 
 #Make predictions on fuel emissions for each scenario for North Africa
 fuel_b_n <- exp(predict(fuel.ols, newdata = b_n, interval = "confidence", level = 0.95))
 fuel_proj_n <- exp(predict(fuel.ols, newdata  = p_n,  interval = "confidence", level = 0.95))
 fuel_h_alt_n <- exp(predict(fuel.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95))
 
-fuel_ha_N <- rbind(fuel_b_n  , fuel_proj_n  , fuel_h_alt_n)
-colnames(fuel_ha_N) <- c("fit_fuel_ha_n","lwr_fuel_ha_n", "upr_fuel_ha_n")
+en_emiss_ha_N <- rbind(fuel_b_n  , fuel_proj_n  , fuel_h_alt_n)
+colnames(en_emiss_ha_N) <- c("fit_en_emiss_ha_n","lwr_en_emiss_ha_n", "upr_en_emiss_ha_n")
 
  #Save fuel emissions per ha as table for working paper
-#fuel_ha_W <- as.data.frame(fuel_ha_W) 
-#fuel_ha_W$Region <- "West Africa"
-# fuel_ha_E <- as.data.frame(fuel_ha_E) 
-# fuel_ha_E$Region <- "East Africa"
-# fuel_ha_N <- as.data.frame(fuel_ha_N) 
-#fuel_ha_N$Region <- "North Africa"
-#fuel_ha_S <- as.data.frame(fuel_ha_S) 
-# fuel_ha_S$Region <- "South Africa"
-# fuel_ha_C <- as.data.frame(fuel_ha_C) 
-# fuel_ha_C$Region <- "Central Africa"
+#en_emiss_ha_W <- as.data.frame(en_emiss_ha_W) 
+#en_emiss_ha_W$Region <- "West Africa"
+# en_emiss_ha_E <- as.data.frame(en_emiss_ha_E) 
+# en_emiss_ha_E$Region <- "East Africa"
+# en_emiss_ha_N <- as.data.frame(en_emiss_ha_N) 
+#en_emiss_ha_N$Region <- "North Africa"
+#en_emiss_ha_S <- as.data.frame(en_emiss_ha_S) 
+# en_emiss_ha_S$Region <- "South Africa"
+# en_emiss_ha_C <- as.data.frame(en_emiss_ha_C) 
+# en_emiss_ha_C$Region <- "Central Africa"
 # 
-# fuel_ha_W$Scenario <- c("Baseline", "Projected","High")
-# fuel_ha_S$Scenario <- c("Baseline", "Projected","High")
-# fuel_ha_C$Scenario <- c("Baseline", "Projected","High")
-#fuel_ha_N$Scenario <- c("Baseline", "Projected","High")
- #fuel_ha_E$Scenario <- c("Baseline", "Projected","High")
+# en_emiss_ha_W$Scenario <- c("Baseline", "Projected","High")
+# en_emiss_ha_S$Scenario <- c("Baseline", "Projected","High")
+# en_emiss_ha_C$Scenario <- c("Baseline", "Projected","High")
+#en_emiss_ha_N$Scenario <- c("Baseline", "Projected","High")
+ #en_emiss_ha_E$Scenario <- c("Baseline", "Projected","High")
 # 
- #colnames(fuel_ha_W) <- c("fit", "lwr", "upr", "Region", "Scenario")
- #colnames(fuel_ha_E) <- c("fit", "lwr", "upr", "Region", "Scenario")
-# colnames(fuel_ha_S) <- c("fit", "lwr", "upr", "Region", "Scenario")
-#colnames(fuel_ha_N) <- c("fit", "lwr", "upr", "Region", "Scenario")
-#colnames(fuel_ha_C) <- c("fit", "lwr", "upr", "Region", "Scenario")
+ #colnames(en_emiss_ha_W) <- c("fit", "lwr", "upr", "Region", "Scenario")
+ #colnames(en_emiss_ha_E) <- c("fit", "lwr", "upr", "Region", "Scenario")
+# colnames(en_emiss_ha_S) <- c("fit", "lwr", "upr", "Region", "Scenario")
+#colnames(en_emiss_ha_N) <- c("fit", "lwr", "upr", "Region", "Scenario")
+#colnames(en_emiss_ha_C) <- c("fit", "lwr", "upr", "Region", "Scenario")
 # 
- #fuel_ha_tbl <- rbind(fuel_ha_W,fuel_ha_S, fuel_ha_C, fuel_ha_N, fuel_ha_E )
-#write.csv(fuel_ha_tbl,"~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/fuel_ha.csv")
+ #en_emiss_ha_tbl <- rbind(en_emiss_ha_W,en_emiss_ha_S, en_emiss_ha_C, en_emiss_ha_N, en_emiss_ha_E )
+#write.csv(en_emiss_ha_tbl,"~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/en_emiss_ha.csv")
 
 
 
@@ -688,8 +579,8 @@ synN_b_e <- exp(predict(syn_n.ols, newdata  = b_e, interval = "confidence", leve
 # synN_proj_e <- predict(syn_n.ols, newdata  = p_e,  interval = "confidence", level = 0.95)
 # synN_h_alt_e <- predict(syn_n.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95)
 
-synN_ha_E <- rbind(synN_b_e, synN_proj_e ,  synN_h_alt_e)
-colnames(synN_ha_E) <- c("fit_synN_ha_e","lwr_synN_ha_e", "upr_synN_ha_e")
+fert_emiss_ha_E <- rbind(synN_b_e, synN_proj_e ,  synN_h_alt_e)
+colnames(fert_emiss_ha_E) <- c("fit_fert_emiss_ha_e","lwr_fert_emiss_ha_e", "upr_fert_emiss_ha_e")
 
 #Make predictions on pesticides use for each scenario for West Africa
  synN_b_w <- exp(predict(syn_n.ols, newdata  = b_w, interval = "confidence", level = 0.95))
@@ -701,8 +592,8 @@ colnames(synN_ha_E) <- c("fit_synN_ha_e","lwr_synN_ha_e", "upr_synN_ha_e")
 # synN_proj_w <- predict(syn_n.ols, newdata  = p_w,  interval = "confidence", level = 0.95)
 # synN_h_alt_w <- predict(syn_n.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95)
 
-synN_ha_W <- rbind(synN_b_w, synN_proj_w ,  synN_h_alt_w)
-colnames(synN_ha_W) <- c("fit_synN_ha_w","lwr_synN_ha_w", "upr_synN_ha_w")
+fert_emiss_ha_W <- rbind(synN_b_w, synN_proj_w ,  synN_h_alt_w)
+colnames(fert_emiss_ha_W) <- c("fit_fert_emiss_ha_w","lwr_fert_emiss_ha_w", "upr_fert_emiss_ha_w")
 
 #Make predictions on pesticides use for each scenario for South Africa
 synN_b_s <- exp(predict(syn_n.ols, newdata  = b_s, interval = "confidence", level = 0.95)) 
@@ -714,8 +605,8 @@ synN_h_alt_s <- exp(predict(syn_n.ols, newdata  = h_alt_s,  interval = "confiden
 # synN_proj_s <- predict(syn_n.ols, newdata  = p_s,  interval = "confidence", level = 0.95)
 # synN_h_alt_s <- predict(syn_n.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95)
 
-synN_ha_S <- rbind(synN_b_s , synN_proj_s ,  synN_h_alt_s)
-colnames(synN_ha_S) <- c("fit_synN_ha_s","lwr_synN_ha_s", "upr_synN_ha_s")
+fert_emiss_ha_S <- rbind(synN_b_s , synN_proj_s ,  synN_h_alt_s)
+colnames(fert_emiss_ha_S) <- c("fit_fert_emiss_ha_s","lwr_fert_emiss_ha_s", "upr_fert_emiss_ha_s")
 
 #Make predictions on pesticides use for each scenario for Central Africa
  synN_b_c <- exp(predict(syn_n.ols, newdata  = b_c, interval = "confidence", level = 0.95))
@@ -727,8 +618,8 @@ colnames(synN_ha_S) <- c("fit_synN_ha_s","lwr_synN_ha_s", "upr_synN_ha_s")
 # synN_proj_c <- predict(syn_n.ols, newdata  = p_c,  interval = "confidence", level = 0.95)
 # synN_h_alt_c <- predict(syn_n.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95)
 
-synN_ha_C <- rbind(synN_b_c , synN_proj_c , synN_h_alt_c)
-colnames(synN_ha_C) <- c("fit_synN_ha_c","lwr_synN_ha_c", "upr_synN_ha_c")
+fert_emiss_ha_C <- rbind(synN_b_c , synN_proj_c , synN_h_alt_c)
+colnames(fert_emiss_ha_C) <- c("fit_fert_emiss_ha_c","lwr_fert_emiss_ha_c", "upr_fert_emiss_ha_c")
 
 #Make predictions on syn N emissions for each scenario for North Africa
  synN_b_n <- exp(predict(syn_n.ols, newdata = b_n, interval = "confidence", level = 0.95))
@@ -740,73 +631,73 @@ colnames(synN_ha_C) <- c("fit_synN_ha_c","lwr_synN_ha_c", "upr_synN_ha_c")
 # synN_proj_n <- predict(syn_n.ols, newdata  = p_n,  interval = "confidence", level = 0.95)
 # synN_h_alt_n <- predict(syn_n.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95)
 
-synN_ha_N <- rbind(synN_b_n , synN_proj_n ,  synN_h_alt_n)
-colnames(synN_ha_N) <- c("fit_synN_ha_n","lwr_synN_ha_n", "upr_synN_ha_n")
+fert_emiss_ha_N <- rbind(synN_b_n , synN_proj_n ,  synN_h_alt_n)
+colnames(fert_emiss_ha_N) <- c("fit_fert_emiss_ha_n","lwr_fert_emiss_ha_n", "upr_fert_emiss_ha_n")
 
 ```
 
 ```{r}
 #Make predictions on synthetic N use for each scenario for East Africa
 
-synNuse_b_e <- exp(predict(syn_n_use.ols, newdata  = b_e, interval = "confidence", level = 0.95))
-synNuse_proj_e <- exp(predict(syn_n_use.ols, newdata  = p_e,  interval = "confidence", level = 0.95))
-synNuse_h_alt_e <- exp(predict(syn_n_use.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95))
+synNuse_b_e <- exp(predict(fert_use.ols, newdata  = b_e, interval = "confidence", level = 0.95))
+synNuse_proj_e <- exp(predict(fert_use.ols, newdata  = p_e,  interval = "confidence", level = 0.95))
+synNuse_h_alt_e <- exp(predict(fert_use.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95))
 
-# synNuse_b_e <- predict(syn_n_use.ols, newdata  = b_e, interval = "confidence", level = 0.95)
-# synNuse_proj_e <- predict(syn_n_use.ols, newdata  = p_e,  interval = "confidence", level = 0.95)
-# synNuse_h_alt_e <- predict(syn_n_use.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95)
+# synNuse_b_e <- predict(fert_use.ols, newdata  = b_e, interval = "confidence", level = 0.95)
+# synNuse_proj_e <- predict(fert_use.ols, newdata  = p_e,  interval = "confidence", level = 0.95)
+# synNuse_h_alt_e <- predict(fert_use.ols, newdata  = h_alt_e,  interval = "confidence", level = 0.95)
 
 synNuse_ha_E <- rbind(synNuse_b_e ,synNuse_proj_e ,synNuse_h_alt_e)
 colnames(synNuse_ha_E) <- c("fit_synNuse_ha_e","lwr_synNuse_ha_e", "upr_synNuse_ha_e")
 
 #Make predictions on synthetic N use for each scenario for West Africa
- synNuse_b_w <- exp(predict(syn_n_use.ols, newdata  = b_w, interval = "confidence", level = 0.95))
- synNuse_proj_w <- exp(predict(syn_n_use.ols, newdata  = p_w,  interval = "confidence", level = 0.95))
- synNuse_h_alt_w <- exp(predict(syn_n_use.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95))
+ synNuse_b_w <- exp(predict(fert_use.ols, newdata  = b_w, interval = "confidence", level = 0.95))
+ synNuse_proj_w <- exp(predict(fert_use.ols, newdata  = p_w,  interval = "confidence", level = 0.95))
+ synNuse_h_alt_w <- exp(predict(fert_use.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95))
 
-# synNuse_b_w <- predict(syn_n_use.ols, newdata  = b_w, interval = "confidence", level = 0.95)
-# synNuse_proj_w <- predict(syn_n_use.ols, newdata  = p_w,  interval = "confidence", level = 0.95)
-# synNuse_h_alt_w <- predict(syn_n_use.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95)
+# synNuse_b_w <- predict(fert_use.ols, newdata  = b_w, interval = "confidence", level = 0.95)
+# synNuse_proj_w <- predict(fert_use.ols, newdata  = p_w,  interval = "confidence", level = 0.95)
+# synNuse_h_alt_w <- predict(fert_use.ols, newdata  = h_alt_w,  interval = "confidence", level = 0.95)
 
 synNuse_ha_W <- rbind(synNuse_b_w, synNuse_proj_w ,  synNuse_h_alt_w)
 colnames(synNuse_ha_W) <- c("fit_synNuse_ha_w","lwr_synNuse_ha_w", "upr_synNuse_ha_w")
 
 
 #Make predictions on synthetic N use use for each scenario for South Africa
-synNuse_b_s <- exp(predict(syn_n_use.ols, newdata  = b_s, interval = "confidence", level = 0.95))
-synNuse_proj_s <- exp(predict(syn_n_use.ols, newdata  = p_s,  interval = "confidence", level = 0.95))
-synNuse_h_alt_s <- exp(predict(syn_n_use.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95))
+synNuse_b_s <- exp(predict(fert_use.ols, newdata  = b_s, interval = "confidence", level = 0.95))
+synNuse_proj_s <- exp(predict(fert_use.ols, newdata  = p_s,  interval = "confidence", level = 0.95))
+synNuse_h_alt_s <- exp(predict(fert_use.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95))
 
 #for senstiviity analysis, linear model
-# synNuse_b_s <- predict(syn_n_use.ols, newdata  = b_s, interval = "confidence", level = 0.95)
-# synNuse_proj_s <- predict(syn_n_use.ols, newdata  = p_s,  interval = "confidence", level = 0.95)
-# synNuse_h_alt_s <- predict(syn_n_use.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95)
+# synNuse_b_s <- predict(fert_use.ols, newdata  = b_s, interval = "confidence", level = 0.95)
+# synNuse_proj_s <- predict(fert_use.ols, newdata  = p_s,  interval = "confidence", level = 0.95)
+# synNuse_h_alt_s <- predict(fert_use.ols, newdata  = h_alt_s,  interval = "confidence", level = 0.95)
 
 synNuse_ha_S <- rbind(synNuse_b_s , synNuse_proj_s ,  synNuse_h_alt_s)
 colnames(synNuse_ha_S) <- c("fit_synNuse_ha_s","lwr_synNuse_ha_s", "upr_synNuse_ha_s")
 
 #Make predictions on Synthetic N use use for each scenario for Central Africa
- synNuse_b_c <- exp(predict(syn_n_use.ols, newdata  = b_c, interval = "confidence", level = 0.95))
- synNuse_proj_c <- exp(predict(syn_n_use.ols, newdata  = p_c,  interval = "confidence", level = 0.95))
- synNuse_h_alt_c <- exp(predict(syn_n_use.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95))
+ synNuse_b_c <- exp(predict(fert_use.ols, newdata  = b_c, interval = "confidence", level = 0.95))
+ synNuse_proj_c <- exp(predict(fert_use.ols, newdata  = p_c,  interval = "confidence", level = 0.95))
+ synNuse_h_alt_c <- exp(predict(fert_use.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95))
 
 #for senstiviity analysis, linear model
-# synNuse_b_c <- predict(syn_n_use.ols, newdata  = b_c, interval = "confidence", level = 0.95)
-# synNuse_proj_c <- predict(syn_n_use.ols, newdata  = p_c,  interval = "confidence", level = 0.95)
-# synNuse_h_alt_c <- predict(syn_n_use.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95)
+# synNuse_b_c <- predict(fert_use.ols, newdata  = b_c, interval = "confidence", level = 0.95)
+# synNuse_proj_c <- predict(fert_use.ols, newdata  = p_c,  interval = "confidence", level = 0.95)
+# synNuse_h_alt_c <- predict(fert_use.ols, newdata  = h_alt_c,  interval = "confidence", level = 0.95)
 
 synNuse_ha_C <- rbind(synNuse_b_c  , synNuse_proj_c ,  synNuse_h_alt_c)
 colnames(synNuse_ha_C) <- c("fit_synNuse_ha_c","lwr_synNuse_ha_c", "upr_synNuse_ha_c")
 
 #Make predictions on synthetic N use for each scenario for North Africa
- synNuse_b_n <- exp(predict(syn_n_use.ols, newdata = b_n, interval = "confidence", level = 0.95))
-synNuse_proj_n <- exp(predict(syn_n_use.ols, newdata  = p_n,  interval = "confidence", level = 0.95))
- synNuse_h_alt_n <- exp(predict(syn_n_use.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95))
+ synNuse_b_n <- exp(predict(fert_use.ols, newdata = b_n, interval = "confidence", level = 0.95))
+synNuse_proj_n <- exp(predict(fert_use.ols, newdata  = p_n,  interval = "confidence", level = 0.95))
+ synNuse_h_alt_n <- exp(predict(fert_use.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95))
 
 #for senstiviity analysis, linear model
-# synNuse_b_n <- predict(syn_n_use.ols, newdata = b_n, interval = "confidence", level = 0.95)
-# synNuse_proj_n <- predict(syn_n_use.ols, newdata  = p_n,  interval = "confidence", level = 0.95)
-# synNuse_h_alt_n <- predict(syn_n_use.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95)
+# synNuse_b_n <- predict(fert_use.ols, newdata = b_n, interval = "confidence", level = 0.95)
+# synNuse_proj_n <- predict(fert_use.ols, newdata  = p_n,  interval = "confidence", level = 0.95)
+# synNuse_h_alt_n <- predict(fert_use.ols, newdata  = h_alt_n,  interval = "confidence", level = 0.95)
 
 synNuse_ha_N <- rbind(synNuse_b_n , synNuse_proj_n, synNuse_h_alt_n )
 colnames(synNuse_ha_N) <- c("fit_synNuse_ha_n","lwr_synNuse_ha_n", "upr_synNuse_ha_n")
@@ -901,15 +792,15 @@ rownames(p_app) <- NULL
 
 #write_csv(predict_tbl, path = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/predict_tbl.csv")
 
-# predict_tbl_E <- as.data.frame(cbind(p_ha_E,fuel_ha_E,synN_ha_E, synNuse_ha_E))
+# predict_tbl_E <- as.data.frame(cbind(p_ha_E,en_emiss_ha_E,fert_emiss_ha_E, synNuse_ha_E))
 # rownames(predict_tbl_E) <- c("Baseline", "Projected",  "High_alt")
-# predict_tbl_W <- as.data.frame(cbind(p_ha_W,fuel_ha_W,synN_ha_W, synNuse_ha_W))
+# predict_tbl_W <- as.data.frame(cbind(p_ha_W,en_emiss_ha_W,fert_emiss_ha_W, synNuse_ha_W))
 # rownames(predict_tbl_W) <- c("Baseline", "Projected",  "High_alt")
-# predict_tbl_S <- as.data.frame(cbind(p_ha_S,fuel_ha_S,synN_ha_S, synNuse_ha_S))
+# predict_tbl_S <- as.data.frame(cbind(p_ha_S,en_emiss_ha_S,fert_emiss_ha_S, synNuse_ha_S))
 # rownames(predict_tbl_S) <- c("Baseline", "Projected", "High_alt")
-# predict_tbl_C <- as.data.frame(cbind(p_ha_C,fuel_ha_C,synN_ha_C, synNuse_ha_C))
+# predict_tbl_C <- as.data.frame(cbind(p_ha_C,en_emiss_ha_C,fert_emiss_ha_C, synNuse_ha_C))
 # rownames(predict_tbl_C) <- c("Baseline", "Projected",  "High_alt")
-# predict_tbl_N <- as.data.frame(cbind(p_ha_N,fuel_ha_N,synN_ha_N, synNuse_ha_N))
+# predict_tbl_N <- as.data.frame(cbind(p_ha_N,en_emiss_ha_N,fert_emiss_ha_N, synNuse_ha_N))
 # rownames(predict_tbl_N) <- c("Baseline", "Projected",  "High_alt")
 # 
 #  write.csv(predict_tbl_E, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/model_coefs_E.Afr.csv")
@@ -1093,14 +984,14 @@ pest_ha_b_afr <- pest_b_afr/cropland_b_afr
 # abline(b=1, a=0) #values fall around this 1:1 line 
 # 
 # 
-# plot(x = log(na.omit(filter_f_reg$fuel_ha)), y = fuel.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
+# plot(x = log(na.omit(filter_f_reg$en_emiss_ha)), y = fuel.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
 #  abline(b=1, a=0) #values should fall around this line, some values are scattered to the left 
 # 
 # 
-# plot(x = log(na.omit(filter_syn_reg$syn_n_ha)), y = syn_n.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
+# plot(x = log(na.omit(filter_syn_reg$fert_emiss_ha)), y = syn_n.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
 # abline(b=1, a=0) #values fall around this 1:1 line 
 # 
-# plot(log(na.omit(filter_syn_n_use_reg$syn_n_use_ha)), syn_n_use.ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
+# plot(log(na.omit(filter_fert_use_reg$fert_use_ha)), fert_use.ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
 # abline(b=1, a=0) #values fall around this 1:1 line 
 ```
 
@@ -1137,75 +1028,75 @@ machinery_emissions <- machinery_energy %>% mutate(Machinery.Emissions = ((`Gas-
 #Combine reg data  (yields and cropland data) with machinery emissions data to calculate machinery emissions/ha by country,year
 
 colnames(machinery_emissions) <- c("country", "year", "gas-diesel oil", "motor-gasoline", "machinery.emissions")
-clean_reg_m <- full_join(clean_reg, machinery_emissions)
-clean_reg_m <- clean_reg_m %>% dplyr::select(year,country,cropland_ha, production_kcal, machinery.emissions)
-clean_reg_m$country_rename <- clean_reg_m$country
+reg_m <- full_join(reg, machinery_emissions)
+reg_m <- reg_m %>% dplyr::select(year,country,cropland_ha, production_kcal, machinery.emissions)
+reg_m$country_rename <- reg_m$country
 
 
-#Aggregate clean_reg_m data by region, rename the country names according to their region in Africa.
-clean_reg_m$country_rename[clean_reg_m$country_rename %in% E_Afr] <-  "E_Afr"
-clean_reg_m$country_rename[clean_reg_m$country_rename %in% W_Afr] <-  "W_Afr"
-clean_reg_m$country_rename[clean_reg_m$country_rename %in% C_Afr] <-  "C_Afr"
-clean_reg_m$country_rename[clean_reg_m$country_rename %in% S_Afr] <-  "S_Afr"
-clean_reg_m$country_rename[clean_reg_m$country_rename %in% N_Afr] <-  "N_Afr"
+#Aggregate reg_m data by region, rename the country names according to their region in Africa.
+reg_m$country_rename[reg_m$country_rename %in% E_Afr] <-  "E_Afr"
+reg_m$country_rename[reg_m$country_rename %in% W_Afr] <-  "W_Afr"
+reg_m$country_rename[reg_m$country_rename %in% C_Afr] <-  "C_Afr"
+reg_m$country_rename[reg_m$country_rename %in% S_Afr] <-  "S_Afr"
+reg_m$country_rename[reg_m$country_rename %in% N_Afr] <-  "N_Afr"
 
-clean_reg_m_E <- dplyr::filter(clean_reg_m,clean_reg_m$country_rename == "E_Afr" )
-clean_reg_m_W <- dplyr::filter(clean_reg_m,clean_reg_m$country_rename == "W_Afr" )
-clean_reg_m_C <- dplyr::filter(clean_reg_m,clean_reg_m$country_rename == "C_Afr" )
-clean_reg_m_S <- dplyr::filter(clean_reg_m,clean_reg_m$country_rename == "S_Afr" )
-clean_reg_m_N <- dplyr::filter(clean_reg_m,clean_reg_m$country_rename == "N_Afr" )
+reg_m_E <- dplyr::filter(reg_m,reg_m$country_rename == "E_Afr" )
+reg_m_W <- dplyr::filter(reg_m,reg_m$country_rename == "W_Afr" )
+reg_m_C <- dplyr::filter(reg_m,reg_m$country_rename == "C_Afr" )
+reg_m_S <- dplyr::filter(reg_m,reg_m$country_rename == "S_Afr" )
+reg_m_N <- dplyr::filter(reg_m,reg_m$country_rename == "N_Afr" )
 
 #For Central Africa, North Africa all machinery emissions are NA. East, South, and West Africa have non-NA values.
 
 #Calculate aggregate values for each region
-clean_reg_E_aggregate <- clean_reg_m_E %>%
+reg_E_aggregate <- reg_m_E %>%
   dplyr::select(year, cropland_ha,production_kcal, machinery.emissions) %>% 
   dplyr::group_by(year) %>%
   dplyr::summarise_all(sum, na.rm = TRUE)
-clean_reg_W_aggregate <- clean_reg_m_W %>%
+reg_W_aggregate <- reg_m_W %>%
   dplyr::select(year, cropland_ha,production_kcal, machinery.emissions) %>% 
   dplyr::group_by(year) %>%
   dplyr::summarise_all(sum, na.rm = TRUE)
-clean_reg_S_aggregate <- clean_reg_m_S %>%
+reg_S_aggregate <- reg_m_S %>%
   dplyr::select(year, cropland_ha,production_kcal,machinery.emissions) %>% 
   dplyr::group_by(year) %>%
   dplyr::summarise_all(sum, na.rm = TRUE)
-clean_reg_N_aggregate <- clean_reg_m_N %>%
+reg_N_aggregate <- reg_m_N %>%
   dplyr::select(year, cropland_ha,production_kcal, machinery.emissions) %>% 
   dplyr::group_by(year) %>%
   dplyr::summarise_all(sum, na.rm = TRUE)
-clean_reg_C_aggregate <- clean_reg_m_C %>%
+reg_C_aggregate <- reg_m_C %>%
   dplyr::select(year, cropland_ha,production_kcal, machinery.emissions) %>% 
   dplyr::group_by(year) %>%
   dplyr::summarise_all(sum, na.rm = TRUE)
 
-clean_reg_E_aggregate$m_ha <- clean_reg_E_aggregate$machinery.emissions/clean_reg_E_aggregate$cropland_ha
-clean_reg_W_aggregate$m_ha <- clean_reg_W_aggregate$machinery.emissions/clean_reg_W_aggregate$cropland_ha
-clean_reg_S_aggregate$m_ha <- clean_reg_S_aggregate$machinery.emissions/clean_reg_S_aggregate$cropland_ha
-clean_reg_C_aggregate$m_ha <- clean_reg_C_aggregate$machinery.emissions/clean_reg_C_aggregate$cropland_ha
-clean_reg_N_aggregate$m_ha <- clean_reg_N_aggregate$machinery.emissions/clean_reg_N_aggregate$cropland_ha
+reg_E_aggregate$m_ha <- reg_E_aggregate$machinery.emissions/reg_E_aggregate$cropland_ha
+reg_W_aggregate$m_ha <- reg_W_aggregate$machinery.emissions/reg_W_aggregate$cropland_ha
+reg_S_aggregate$m_ha <- reg_S_aggregate$machinery.emissions/reg_S_aggregate$cropland_ha
+reg_C_aggregate$m_ha <- reg_C_aggregate$machinery.emissions/reg_C_aggregate$cropland_ha
+reg_N_aggregate$m_ha <- reg_N_aggregate$machinery.emissions/reg_N_aggregate$cropland_ha
 
-clean_reg_E_aggregate$yield <- clean_reg_E_aggregate$production_kcal/clean_reg_E_aggregate$cropland_ha
-clean_reg_W_aggregate$yield <- clean_reg_W_aggregate$production_kcal/clean_reg_W_aggregate$cropland_ha
-clean_reg_S_aggregate$yield <- clean_reg_S_aggregate$production_kcal/clean_reg_S_aggregate$cropland_ha
-clean_reg_C_aggregate$yield <- clean_reg_C_aggregate$production_kcal/clean_reg_C_aggregate$cropland_ha
-clean_reg_N_aggregate$yield <- clean_reg_N_aggregate$production_kcal/clean_reg_N_aggregate$cropland_ha
+reg_E_aggregate$yield <- reg_E_aggregate$production_kcal/reg_E_aggregate$cropland_ha
+reg_W_aggregate$yield <- reg_W_aggregate$production_kcal/reg_W_aggregate$cropland_ha
+reg_S_aggregate$yield <- reg_S_aggregate$production_kcal/reg_S_aggregate$cropland_ha
+reg_C_aggregate$yield <- reg_C_aggregate$production_kcal/reg_C_aggregate$cropland_ha
+reg_N_aggregate$yield <- reg_N_aggregate$production_kcal/reg_N_aggregate$cropland_ha
 
-clean_reg_E_aggregate$country <- "East"
-clean_reg_W_aggregate$country <- "West"
-clean_reg_S_aggregate$country <- "Southern"
-clean_reg_C_aggregate$country<- "Central"
-clean_reg_N_aggregate$country <- "North"
+reg_E_aggregate$country <- "East"
+reg_W_aggregate$country <- "West"
+reg_S_aggregate$country <- "Southern"
+reg_C_aggregate$country<- "Central"
+reg_N_aggregate$country <- "North"
 
 #join aggregate machinery emissions data for Africa regions with non-Africa dataframe
 reg_other_country <- reg_other_country %>% dplyr::select(year, country)
-reg_other_country <- inner_join(reg_other_country, clean_reg_m) # add machinery values to non-Africa dataframe
+reg_other_country <- inner_join(reg_other_country, reg_m) # add machinery values to non-Africa dataframe
 
-reg_all_countries <- full_join(reg_other_country ,clean_reg_E_aggregate )
-reg_all_countries <- full_join(reg_all_countries ,clean_reg_W_aggregate )
-reg_all_countries <- full_join(reg_all_countries ,clean_reg_S_aggregate )
-reg_all_countries <- full_join(reg_all_countries,clean_reg_C_aggregate )
-reg_all_countries <- full_join(reg_all_countries ,clean_reg_N_aggregate )
+reg_all_countries <- full_join(reg_other_country ,reg_E_aggregate )
+reg_all_countries <- full_join(reg_all_countries ,reg_W_aggregate )
+reg_all_countries <- full_join(reg_all_countries ,reg_S_aggregate )
+reg_all_countries <- full_join(reg_all_countries,reg_C_aggregate )
+reg_all_countries <- full_join(reg_all_countries ,reg_N_aggregate )
 
 reg_all_countries$yield <- reg_all_countries$production_kcal/reg_all_countries$cropland_ha
 reg_all_countries$m_ha <- reg_all_countries$machinery.emissions/reg_all_countries$cropland_ha
@@ -1352,15 +1243,15 @@ machinery_h_alt_n <- machinery_ha_n[3,]
 rownames(machinery_h_alt_n) <- NULL
 
 #add machinery emisions data to predictions_clean
-predict_tbl_E <- as.data.frame(cbind(p_ha_E,fuel_ha_E,synN_ha_E, synNuse_ha_E, machinery_ha_E))
+predict_tbl_E <- as.data.frame(cbind(p_ha_E,en_emiss_ha_E,fert_emiss_ha_E, synNuse_ha_E, machinery_ha_E))
 rownames(predict_tbl_E) <- c("Baseline", "Projected",  "High_alt")
-predict_tbl_W <- as.data.frame(cbind(p_ha_W,fuel_ha_W,synN_ha_W, synNuse_ha_W, machinery_ha_W))
+predict_tbl_W <- as.data.frame(cbind(p_ha_W,en_emiss_ha_W,fert_emiss_ha_W, synNuse_ha_W, machinery_ha_W))
 rownames(predict_tbl_W) <- c("Baseline", "Projected",  "High_alt")
-predict_tbl_S <- as.data.frame(cbind(p_ha_S,fuel_ha_S,synN_ha_S, synNuse_ha_S, machinery_ha_S))
+predict_tbl_S <- as.data.frame(cbind(p_ha_S,en_emiss_ha_S,fert_emiss_ha_S, synNuse_ha_S, machinery_ha_S))
 rownames(predict_tbl_S) <- c("Baseline", "Projected", "High_alt")
-predict_tbl_C <- as.data.frame(cbind(p_ha_C,fuel_ha_C,synN_ha_C, synNuse_ha_C, machinery_ha_c))
+predict_tbl_C <- as.data.frame(cbind(p_ha_C,en_emiss_ha_C,fert_emiss_ha_C, synNuse_ha_C, machinery_ha_c))
 rownames(predict_tbl_C) <- c("Baseline", "Projected",  "High_alt")
-predict_tbl_N <- as.data.frame(cbind(p_ha_N,fuel_ha_N,synN_ha_N, synNuse_ha_N, machinery_ha_n))
+predict_tbl_N <- as.data.frame(cbind(p_ha_N,en_emiss_ha_N,fert_emiss_ha_N, synNuse_ha_N, machinery_ha_n))
 rownames(predict_tbl_N) <- c("Baseline", "Projected",  "High_alt")
 
  write.csv(predict_tbl_E, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/model_coefs_E.Afr.csv")
@@ -1480,33 +1371,33 @@ predict_tbl_N <- na.omit(predict_tbl_N)
 
 #Rename energy sources in predict tbls
 predict_tbl_C$Energy_Source <- str_replace(predict_tbl_C$Energy_Source, "p_ha_C","Manufacturing Pesticides")
-predict_tbl_C$Energy_Source <- str_replace(predict_tbl_C$Energy_Source, "fuel_ha_C","On-Farm Fuel")
-predict_tbl_C$Energy_Source  <- str_replace(predict_tbl_C$Energy_Source , "synN_ha_C","Synthetic N")
+predict_tbl_C$Energy_Source <- str_replace(predict_tbl_C$Energy_Source, "en_emiss_ha_C","On-Farm Fuel")
+predict_tbl_C$Energy_Source  <- str_replace(predict_tbl_C$Energy_Source , "fert_emiss_ha_C","Synthetic N")
 predict_tbl_C$Energy_Source  <- str_replace(predict_tbl_C$Energy_Source , "synNuse_ha_c","Manufacturing Fertilizers")
 predict_tbl_C$Energy_Source  <- str_replace(predict_tbl_C$Energy_Source , " machinery_ha_c","Embodied Energy in Machinery")
 
 predict_tbl_E$Energy_Source <- str_replace(predict_tbl_E$Energy_Source, "p_ha_e","Manufacturing Pesticides")
-predict_tbl_E$Energy_Source <- str_replace(predict_tbl_E$Energy_Source, "fuel_ha_e","On-Farm Fuel")
-predict_tbl_E$Energy_Source  <- str_replace(predict_tbl_E$Energy_Source , "synN_ha_E","Synthetic N")
+predict_tbl_E$Energy_Source <- str_replace(predict_tbl_E$Energy_Source, "en_emiss_ha_e","On-Farm Fuel")
+predict_tbl_E$Energy_Source  <- str_replace(predict_tbl_E$Energy_Source , "fert_emiss_ha_E","Synthetic N")
 predict_tbl_E$Energy_Source  <- str_replace(predict_tbl_E$Energy_Source ,  "syn_Nuse_ha_e","Manufacturing Fertilizers")
 predict_tbl_E$Energy_Source  <- str_replace(predict_tbl_E$Energy_Source , " machinery_ha_e","Embodied Energy in Machinery")
 
 predict_tbl_W$Energy_Source <- str_replace(predict_tbl_W$Energy_Source, "p_ha_W","Manufacturing Pesticides")
-predict_tbl_W$Energy_Source <- str_replace(predict_tbl_W$Energy_Source, "fuel_ha_W","On-Farm Fuel")
-predict_tbl_W$Energy_Source  <- str_replace(predict_tbl_W$Energy_Source , "synN_ha_W","Synthetic N")
+predict_tbl_W$Energy_Source <- str_replace(predict_tbl_W$Energy_Source, "en_emiss_ha_W","On-Farm Fuel")
+predict_tbl_W$Energy_Source  <- str_replace(predict_tbl_W$Energy_Source , "fert_emiss_ha_W","Synthetic N")
 predict_tbl_W$Energy_Source  <- str_replace(predict_tbl_W$Energy_Source ,  "synNuse_ha_w","Manufacturing Fertilizers")
 predict_tbl_W$Energy_Source  <- str_replace(predict_tbl_W$Energy_Source ,  "syn_Nuse_ha_w","Manufacturing Fertilizers")
 predict_tbl_W$Energy_Source  <- str_replace(predict_tbl_W$Energy_Source , "machinery_ha_w","Embodied Energy in Machinery")
 
 predict_tbl_N$Energy_Source <- str_replace(predict_tbl_N$Energy_Source, "p_ha_N","Manufacturing Pesticides")
-predict_tbl_N$Energy_Source <- str_replace(predict_tbl_N$Energy_Source, "fuel_ha_N","On-Farm Fuel")
-predict_tbl_N$Energy_Source  <- str_replace(predict_tbl_N$Energy_Source , "synN_ha_N","Synthetic N")
+predict_tbl_N$Energy_Source <- str_replace(predict_tbl_N$Energy_Source, "en_emiss_ha_N","On-Farm Fuel")
+predict_tbl_N$Energy_Source  <- str_replace(predict_tbl_N$Energy_Source , "fert_emiss_ha_N","Synthetic N")
 predict_tbl_N$Energy_Source  <- str_replace(predict_tbl_N$Energy_Source ,  " synNuse_ha_n","Manufacturing Fertilizers")
 predict_tbl_N$Energy_Source  <- str_replace(predict_tbl_N$Energy_Source , "machinery_ha_n","Embodied Energy in Machinery")
 
 predict_tbl_S$Energy_Source <- str_replace(predict_tbl_S$Energy_Source, "p_ha_S","Manufacturing Pesticides")
-predict_tbl_S$Energy_Source <- str_replace(predict_tbl_S$Energy_Source, "fuel_ha_S","On-Farm Fuel")
-predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "synN_ha_S","Synthetic N")
+predict_tbl_S$Energy_Source <- str_replace(predict_tbl_S$Energy_Source, "en_emiss_ha_S","On-Farm Fuel")
+predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "fert_emiss_ha_S","Synthetic N")
 predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source ,  " synNuse_ha_s","Manufacturing Fertilizers")
 predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "machinery_ha_s","Embodied Energy in Machinery")
 
@@ -1520,39 +1411,39 @@ predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "machi
 
 #Calculate means for standard error
 #predict_tbl_C$mean_p <- rowMeans(cbind(predict_tbl_C$`lwr - p_ha_C`, predict_tbl_C$`upr - p_ha_C`)) 
-#predict_tbl_C$mean_f <- rowMeans(cbind(predict_tbl_C$`lwr - fuel_ha_C`, predict_tbl_C$`upr - fuel_ha_C`)) 
+#predict_tbl_C$mean_f <- rowMeans(cbind(predict_tbl_C$`lwr - en_emiss_ha_C`, predict_tbl_C$`upr - en_emiss_ha_C`)) 
 #predict_tbl_C$mean_synNuse <- rowMeans(cbind(predict_tbl_C$`lwr - synNuse_ha_c`, predict_tbl_C$`upr - synNuse_ha_c`)) 
-#predict_tbl_C$mean_synN <- rowMeans(cbind(predict_tbl_C$`lwr - synN_ha_C`, predict_tbl_C$`upr - synN_ha_C`)) 
+#predict_tbl_C$mean_synN <- rowMeans(cbind(predict_tbl_C$`lwr - fert_emiss_ha_C`, predict_tbl_C$`upr - fert_emiss_ha_C`)) 
 #predict_tbl_C$mean_m <- rowMeans(cbind(predict_tbl_C$`lwr - machinery_ha_c`, predict_tbl_C$`upr - machinery_ha_c`)) 
 
 # predict_tbl_N$mean_p <- rowMeans(cbind(predict_tbl_N$`lwr - p_ha_N`, predict_tbl_N$`upr - p_ha_N`)) 
-# predict_tbl_N$mean_f <- rowMeans(cbind(predict_tbl_N$`lwr - fuel_ha_N`, predict_tbl_N$`upr - fuel_ha_N`)) 
+# predict_tbl_N$mean_f <- rowMeans(cbind(predict_tbl_N$`lwr - en_emiss_ha_N`, predict_tbl_N$`upr - en_emiss_ha_N`)) 
 # predict_tbl_N$mean_synNuse <- rowMeans(cbind(predict_tbl_N$`lwr - synNuse_ha_n`, predict_tbl_N$`upr - synNuse_ha_n`)) 
-# predict_tbl_N$mean_synN <- rowMeans(cbind(predict_tbl_N$`lwr - synN_ha_N`, predict_tbl_N$`upr - synN_ha_N`)) 
+# predict_tbl_N$mean_synN <- rowMeans(cbind(predict_tbl_N$`lwr - fert_emiss_ha_N`, predict_tbl_N$`upr - fert_emiss_ha_N`)) 
 # predict_tbl_N$mean_m <- rowMeans(cbind(predict_tbl_N$`lwr - machinery_ha_n`, predict_tbl_N$`upr - machinery_ha_n`)) 
 
 # predict_tbl_W$mean_p <- rowMeans(cbind(predict_tbl_W$`lwr - p_ha_W`, predict_tbl_W$`upr - p_ha_W`)) 
-# predict_tbl_W$mean_f <- rowMeans(cbind(predict_tbl_W$`lwr - fuel_ha_W`, predict_tbl_W$`upr - fuel_ha_W`)) 
+# predict_tbl_W$mean_f <- rowMeans(cbind(predict_tbl_W$`lwr - en_emiss_ha_W`, predict_tbl_W$`upr - en_emiss_ha_W`)) 
 # predict_tbl_W$mean_synNuse <- rowMeans(cbind(predict_tbl_W$`lwr - syn_Nuse_ha_w`, predict_tbl_W$`upr - syn_Nuse_ha_w`)) 
-# predict_tbl_W$mean_synN <- rowMeans(cbind(predict_tbl_W$`lwr - synN_ha_W`, predict_tbl_W$`upr - synN_ha_W`)) 
+# predict_tbl_W$mean_synN <- rowMeans(cbind(predict_tbl_W$`lwr - fert_emiss_ha_W`, predict_tbl_W$`upr - fert_emiss_ha_W`)) 
 # predict_tbl_W$mean_m <- rowMeans(cbind(predict_tbl_W$`lwr -machinery_ha_w`, predict_tbl_W$`upr - machinery_ha_w`))
 # 
 # predict_tbl_S$mean_p <- rowMeans(cbind(predict_tbl_S$`lwr - p_ha_S`, predict_tbl_S$`upr - p_ha_S`)) 
-# predict_tbl_S$mean_f <- rowMeans(cbind(predict_tbl_S$`lwr - fuel_ha_S`, predict_tbl_S$`upr - fuel_ha_S`)) 
+# predict_tbl_S$mean_f <- rowMeans(cbind(predict_tbl_S$`lwr - en_emiss_ha_S`, predict_tbl_S$`upr - en_emiss_ha_S`)) 
 # predict_tbl_S$mean_synNuse <- rowMeans(cbind(predict_tbl_S$`lwr - synNuse_ha_s`, predict_tbl_S$`upr - synNuse_ha_s`)) 
-# predict_tbl_S$mean_synN <- rowMeans(cbind(predict_tbl_S$`lwr - synN_ha_S`, predict_tbl_S$`upr - synN_ha_S`)) 
+# predict_tbl_S$mean_synN <- rowMeans(cbind(predict_tbl_S$`lwr - fert_emiss_ha_S`, predict_tbl_S$`upr - fert_emiss_ha_S`)) 
 # predict_tbl_S$mean_m <- rowMeans(cbind(predict_tbl_S$`lwr - machinery_ha_s`, predict_tbl_S$`upr - machinery_ha_s`))
 # 
 # predict_tbl_E$mean_p <- rowMeans(cbind(predict_tbl_E$`lwr - p_ha_e`, predict_tbl_E$`upr - p_ha_e`)) 
-# predict_tbl_E$mean_f <- rowMeans(cbind(predict_tbl_E$`lwr - fuel_ha_e`, predict_tbl_E$`upr - fuel_ha_e`)) 
+# predict_tbl_E$mean_f <- rowMeans(cbind(predict_tbl_E$`lwr - en_emiss_ha_e`, predict_tbl_E$`upr - en_emiss_ha_e`)) 
 # predict_tbl_E$mean_synNuse <- rowMeans(cbind(predict_tbl_E$`lwr - syn_Nuse_ha_e`, predict_tbl_E$`upr - syn_Nuse_ha_e`)) 
-# predict_tbl_E$mean_synN <- rowMeans(cbind(predict_tbl_E$`lwr - synN_ha_E`, predict_tbl_E$`upr - synN_ha_E`)) 
+# predict_tbl_E$mean_synN <- rowMeans(cbind(predict_tbl_E$`lwr - fert_emiss_ha_E`, predict_tbl_E$`upr - fert_emiss_ha_E`)) 
 # predict_tbl_E$mean_m <- rowMeans(cbind(predict_tbl_E$`lwr - machinery_ha_e`, predict_tbl_E$`upr - machinery_ha_e`))
 # 
 # #predict_tbl$mean_p <- rowMeans(cbind(predict_tbl$`lwr - p_ha`, predict_tbl$`upr - p_ha`)) 
-# #predict_tbl$mean_f <- rowMeans(cbind(predict_tbl$`lwr - fuel_ha`, predict_tbl$`upr - fuel_ha`)) 
-# #predict_tbl$mean_synNuse <- rowMeans(cbind(predict_tbl$`lwr - syn_n_use_ha`, predict_tbl$`upr - syn_n_use_ha`)) 
-# #predict_tbl$mean_synN <- rowMeans(cbind(predict_tbl$`lwr - syn_n_ha`, predict_tbl$`upr - syn_n_ha`)) 
+# #predict_tbl$mean_f <- rowMeans(cbind(predict_tbl$`lwr - en_emiss_ha`, predict_tbl$`upr - en_emiss_ha`)) 
+# #predict_tbl$mean_synNuse <- rowMeans(cbind(predict_tbl$`lwr - fert_use_ha`, predict_tbl$`upr - fert_use_ha`)) 
+# #predict_tbl$mean_synN <- rowMeans(cbind(predict_tbl$`lwr - fert_emiss_ha`, predict_tbl$`upr - fert_emiss_ha`)) 
 # #predict_tbl$mean_m <- rowMeans(cbind(predict_tbl$`lwr - m_ha`, predict_tbl$`upr - m_ha`)) 
 # 
 # #Set upper and lower bounds of standard error error bars
@@ -1568,17 +1459,17 @@ predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "machi
 # p_upr_W <- ((predict_tbl_W$`upr - p_ha_W` + predict_tbl_W$mean_p)/1.96) 
 # p_upr_E <- ((predict_tbl_E$`upr - p_ha_e` + predict_tbl_E$mean_p)/1.96)
 # 
-# f_lwr_N <- ((predict_tbl_N$`lwr - fuel_ha_N` + predict_tbl_N$mean_f)/1.96)
-# f_lwr_S <- ((predict_tbl_S$`lwr - fuel_ha_S` + predict_tbl_S$mean_f)/1.96)
-# f_lwr_C <- ((predict_tbl_C$`lwr - fuel_ha_C` + predict_tbl_C$mean_f)/1.96)
-# f_lwr_W <- ((predict_tbl_W$`lwr - fuel_ha_W` + predict_tbl_W$mean_f)/1.96) 
-# f_lwr_E <- ((predict_tbl_E$`lwr - fuel_ha_e` + predict_tbl_E$mean_f)/1.96)
+# f_lwr_N <- ((predict_tbl_N$`lwr - en_emiss_ha_N` + predict_tbl_N$mean_f)/1.96)
+# f_lwr_S <- ((predict_tbl_S$`lwr - en_emiss_ha_S` + predict_tbl_S$mean_f)/1.96)
+# f_lwr_C <- ((predict_tbl_C$`lwr - en_emiss_ha_C` + predict_tbl_C$mean_f)/1.96)
+# f_lwr_W <- ((predict_tbl_W$`lwr - en_emiss_ha_W` + predict_tbl_W$mean_f)/1.96) 
+# f_lwr_E <- ((predict_tbl_E$`lwr - en_emiss_ha_e` + predict_tbl_E$mean_f)/1.96)
 
-# f_upr_N <- ((predict_tbl_N$`upr - fuel_ha_N`  + predict_tbl_N$mean_f)/1.96)
-# f_upr_S <- ((predict_tbl_S$`upr - fuel_ha_S` + predict_tbl_S$mean_f)/1.96)
-# f_upr_C <- ((predict_tbl_C$`upr - fuel_ha_C` + predict_tbl_C$mean_f)/1.96)
-# f_upr_W <- ((predict_tbl_W$`upr - fuel_ha_W` + predict_tbl_W$mean_f)/1.96)
-# f_upr_E <- ((predict_tbl_E$`upr - fuel_ha_e` + predict_tbl_E$mean_f)/1.96)
+# f_upr_N <- ((predict_tbl_N$`upr - en_emiss_ha_N`  + predict_tbl_N$mean_f)/1.96)
+# f_upr_S <- ((predict_tbl_S$`upr - en_emiss_ha_S` + predict_tbl_S$mean_f)/1.96)
+# f_upr_C <- ((predict_tbl_C$`upr - en_emiss_ha_C` + predict_tbl_C$mean_f)/1.96)
+# f_upr_W <- ((predict_tbl_W$`upr - en_emiss_ha_W` + predict_tbl_W$mean_f)/1.96)
+# f_upr_E <- ((predict_tbl_E$`upr - en_emiss_ha_e` + predict_tbl_E$mean_f)/1.96)
 # 
 # synNuse_lwr_N <- ((predict_tbl_N$`lwr - synNuse_ha_n` + predict_tbl_N$mean_synNuse)/1.96)
 # synNuse_lwr_S <- ((predict_tbl_S$`lwr - synNuse_ha_s` + predict_tbl_S$mean_synNuse)/1.96)
@@ -1592,17 +1483,17 @@ predict_tbl_S$Energy_Source  <- str_replace(predict_tbl_S$Energy_Source , "machi
 # synNuse_upr_W <- ((predict_tbl_W$`upr - syn_Nuse_ha_w` + predict_tbl_W$mean_synNuse)/1.96)
 # synNuse_upr_E <- ((predict_tbl_E$`upr - syn_Nuse_ha_e` + predict_tbl_E$mean_synNuse)/1.96)
 # 
-# synN_lwr_N <- ((predict_tbl_N$`lwr - synN_ha_N` + predict_tbl_N$mean_synN)/1.96)
-# synN_lwr_S <- ((predict_tbl_S$`lwr - synN_ha_S` + predict_tbl_S$mean_synN)/1.96)
-# synN_lwr_C <- ((predict_tbl_C$`lwr - synN_ha_C` + predict_tbl_C$mean_synN)/1.96)
-# synN_lwr_W <- ((predict_tbl_W$`lwr - synN_ha_W` + predict_tbl_W$mean_synN)/1.96)
-# synN_lwr_E <- ((predict_tbl_E$`lwr - synN_ha_E` + predict_tbl_E$mean_synN)/1.96) 
+# synN_lwr_N <- ((predict_tbl_N$`lwr - fert_emiss_ha_N` + predict_tbl_N$mean_synN)/1.96)
+# synN_lwr_S <- ((predict_tbl_S$`lwr - fert_emiss_ha_S` + predict_tbl_S$mean_synN)/1.96)
+# synN_lwr_C <- ((predict_tbl_C$`lwr - fert_emiss_ha_C` + predict_tbl_C$mean_synN)/1.96)
+# synN_lwr_W <- ((predict_tbl_W$`lwr - fert_emiss_ha_W` + predict_tbl_W$mean_synN)/1.96)
+# synN_lwr_E <- ((predict_tbl_E$`lwr - fert_emiss_ha_E` + predict_tbl_E$mean_synN)/1.96) 
 # 
-# synN_upr_N <- ((predict_tbl_N$`upr - synN_ha_N` + predict_tbl_N$mean_synN)/1.96)
-# synN_upr_S <- ((predict_tbl_S$`upr - synN_ha_S` + predict_tbl_S$mean_synN)/1.96)
-# synN_upr_C <- ((predict_tbl_C$`upr - synN_ha_C` + predict_tbl_C$mean_synN)/1.96)
-# synN_upr_W <- ((predict_tbl_W$`upr - synN_ha_W` + predict_tbl_W$mean_synN)/1.96)
-# synN_upr_E <- ((predict_tbl_E$`upr - synN_ha_E` + predict_tbl_E$mean_synN)/1.96)
+# synN_upr_N <- ((predict_tbl_N$`upr - fert_emiss_ha_N` + predict_tbl_N$mean_synN)/1.96)
+# synN_upr_S <- ((predict_tbl_S$`upr - fert_emiss_ha_S` + predict_tbl_S$mean_synN)/1.96)
+# synN_upr_C <- ((predict_tbl_C$`upr - fert_emiss_ha_C` + predict_tbl_C$mean_synN)/1.96)
+# synN_upr_W <- ((predict_tbl_W$`upr - fert_emiss_ha_W` + predict_tbl_W$mean_synN)/1.96)
+# synN_upr_E <- ((predict_tbl_E$`upr - fert_emiss_ha_E` + predict_tbl_E$mean_synN)/1.96)
 # 
 # m_lwr_N <- ((predict_tbl_N$`lwr - machinery_ha_n` + predict_tbl_N$mean_m)/1.96)
 # m_lwr_S <- ((predict_tbl_S$`lwr - machinery_ha_s` + predict_tbl_S$mean_m)/1.96)
@@ -2448,10 +2339,10 @@ write_csv(all_emis, path = "~/Google Drive/Energy and GHG Analysis (2019)/energy
 ```{r OLS Estimators table and Predictions Estimator table}
 m.ols_coef <- rbind(m.ols$coefficients[1],m.ols$coefficients[2])
 p.ols_coef <- rbind(p.ols$coefficients[1],p.ols$coefficients[2])
-syn_n_use.coef  <- rbind(syn_n_use.ols$coefficients[1],syn_n_use.ols$coefficients[2])
+fert_use.coef  <- rbind(fert_use.ols$coefficients[1],fert_use.ols$coefficients[2])
 syn_n.coef <- rbind(syn_n.ols$coefficients[1],syn_n.ols$coefficients[2])
 fuel.coef <- rbind(fuel.ols$coefficients[1], fuel.ols$coefficients[2])
-energy_coefs <- cbind(m.ols_coef, p.ols_coef, syn_n.coef, syn_n_use.coef, fuel.coef)
+energy_coefs <- cbind(m.ols_coef, p.ols_coef, syn_n.coef, fert_use.coef, fuel.coef)
 colnames(energy_coefs) <- c("machinery energy emissions", "manufacturing pesticides emissions", "synthetic N fertilizer emissions", "manufacturing fertilizers emissions", "on-farm fuel energy emissions")
 energy_coefs[2,1] <- exp(energy_coefs[2,1])
 energy_coefs[2,2] <- exp(energy_coefs[2,2])
@@ -2477,10 +2368,10 @@ m.coeffs$coeffs <- rownames(m.coeffs)
 rownames(p.coeffs) <- NULL
 write.csv(m.coeffs, "~/Desktop/Energy-Ag_tbls/m_coeffs.csv")
 
-syn_n_use.coeffs <- as.data.frame(syn_n_use.ols$coefficients)
-syn_n_use.coeffs$coeffs <- rownames(syn_n_use.coeffs)
-rownames(syn_n_use.coeffs) <- NULL
-write.csv(syn_n_use.coeffs, "~/Desktop/Energy-Ag_tbls/syn_n_use_coeffs.csv")
+fert_use.coeffs <- as.data.frame(fert_use.ols$coefficients)
+fert_use.coeffs$coeffs <- rownames(fert_use.coeffs)
+rownames(fert_use.coeffs) <- NULL
+write.csv(fert_use.coeffs, "~/Desktop/Energy-Ag_tbls/fert_use_coeffs.csv")
 
 syn_n.coeffs <- as.data.frame(syn_n.ols$coefficients)
 syn_n.coeffs$coeffs <- rownames(syn_n.coeffs)
