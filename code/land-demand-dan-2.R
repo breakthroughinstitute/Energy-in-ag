@@ -121,6 +121,7 @@ d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign r
                   Africa = case_when(CountryName %in% Africa ~ "Africa"))
 
 africa_scenario_countries <- d %>% filter(Africa=="Africa") %>% select(CountryName) %>% distinct() %>% pull()
+write.csv(africa_scenario_countries, file = "int_data/countries_included_in_africa.csv")
 
 #select only columns for scenarios
 scenario_d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>% filter(is.na(Africa)==F)
