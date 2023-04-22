@@ -186,7 +186,7 @@ aggregate_reg <- function(region_data, region_name){
   summarise_all(sum, na.rm= TRUE) #sum total values across region by year
   
   #calculate per hectare values
-  output <- output %>% mutate(yield = tot_kcal/cropland, en_emiss_ha = en_emiss/cropland, p_ha = pest_use/cropland, fert_emiss_ha = fert_emiss/cropland, fert_use_per_ha = fert_use/cropland, country = region_name)
+  output <- output %>% mutate(yield = tot_kcal/cropland, en_emiss_ha = en_emiss/cropland, p_ha = pest_use/cropland, fert_emiss_ha = fert_emiss/cropland, fert_use_ha = fert_use/cropland, country = region_name)
   
   return(output)
 }
@@ -198,61 +198,15 @@ reg_N_aggregate <- aggregate_reg(reg_E, "North")
 reg_C_aggregate <- aggregate_reg(reg_E, "Central")
 ```
 
-#Regression Code
 ```{r Load in other countries' data and join it with African regions data}
-
-reg_other_country <- reg
-
 #Filter out Africa data, keep non-Africa data 
-reg_other_country <- mutate(reg, Country_rename = country)
-reg_other_country$Country_rename[reg_other_country$Country_rename %in% N_Afr] <-  "North" # recode 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "North" ) #filter so all countries' data except those in North Africa are included
-
-reg_other_country$Country_rename[reg_other_country$Country_rename %in% S_Afr] <-  "South" # recode 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "South" ) #filter so only all countries' data except those in South Africa are included
-
-reg_other_country$Country_rename[reg_other_country$Country_rename %in% W_Afr] <-  "West" # recode 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "West" ) #filter so only all countries' data except those in West Africa are included
-
-reg_other_country$Country_rename[reg_other_country$Country_rename %in% E_Afr] <-  "East" # recode 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "East" ) #filter so only all countries' data except those in West Africa are included
-
-reg_other_country$Country_rename[reg_other_country$Country_rename %in% C_Afr] <-  "Central" # recode 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Central" ) #filter so only all countries' data except those in West Africa are included
-
-#Eliminate African countries data that are not in FOFA data & not covered by regions above. These countries have data in FAOSTAT. 
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Sudan" )
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Sudan(former)" )
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Congo" )
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Djibouti")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Equatorial Guinea" )
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Eritrea")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Comoros")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Seychelles")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Sao Tome and Principe")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Guinea-Bissau")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Réunion")
-reg_other_country <- dplyr::filter(reg_other_country,reg_other_country$Country_rename != "Libya")
-
-#Calculate Yields for all the other countries 
-reg_other_country$yield <- reg_other_country$production_kcal/reg_other_country$cropland_ha
+reg_other_country <- reg %>% filter(!Country_rename %in% c("N_Afr", "C_Afr", "S_Afr","E_Afr","W_Afr")) %>% select(-Country_rename)
 
 #Join Africa data with all of the countries' (non Africa) data
-reg_other_country <- reg_other_country %>%
-  dplyr::select(country,year, energy_used_in_fishery, synthetic_nitrogen_fertilizers,fert_use,  total_energy, transport_fuel_used_in_agriculture_excl_fishery,pesticides_total, fuel_emissions,en_emiss_ha, p_ha, fert_emiss_ha,fert_use_ha, yield,production_kcal, cropland_ha)
-
-reg_all_countries <- dplyr::full_join(reg_other_country, reg_W_aggregate) 
-
-reg_all_countries <- dplyr::full_join(reg_all_countries, reg_E_aggregate)  
-
-reg_all_countries <- dplyr::full_join(reg_all_countries, reg_S_aggregate)
-
-reg_all_countries <- dplyr::full_join(reg_all_countries , reg_C_aggregate)
-
-reg_all_countries <- dplyr::full_join(reg_all_countries , reg_N_aggregate) 
-
+reg_other_country <- bind_rows(reg_other_country, reg_C_aggregate, reg_E_aggregate, reg_S_aggregate, reg_W_aggregate, reg_N_aggregate)
 ```
 
+#Regression Code
 ```{r Run OLS linear regressions with filtered regression data to estimate relationship between yield and input use factor }
 
 #OLS model includes country fixed effect to reduce bias
