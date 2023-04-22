@@ -159,7 +159,7 @@ write_csv(regions_scenario,"int_data/scenarios.csv")
 CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, crop, tot_H, tot_S)
 
 #change African country names in World_CO2_loss so that they match Africa list
-CO2_loss2 <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) 
+CO2_loss <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) 
 
 # # Lower estimate of LUC -------------------------------------------------
 # # Leave negative LUC values as-is. This does not reflect shifting cropland. Negative LUC means that farmland is abandoned and becomes native vegetation.
