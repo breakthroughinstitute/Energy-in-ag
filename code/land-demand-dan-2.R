@@ -156,11 +156,10 @@ write_csv(regions_scenario,"int_data/scenarios.csv")
 
 #Import csv with total kg CO2 emitted (veg CO2 loss and soil CO2 loss) per ha LUC of a particular crop, by country in Africa. 
 #This table include values using Searchinger's 40% (S) and Houghton's 25% (H) estimates of soil carbon loss for cropland conversion
-CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv")
+CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, crop, tot_H, tot_S)
 
 #change African country names in World_CO2_loss so that they match Africa list
-CO2_loss[CO2_loss$Country == "Congo",]$Country <- "Republic of the Congo" 
-CO2_loss[CO2_loss$Country == "Tanzania, United Republic of",]$Country <- "United Republic Of Tanzania" 
+CO2_loss2 <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) 
 
 # # Lower estimate of LUC -------------------------------------------------
 # # Leave negative LUC values as-is. This does not reflect shifting cropland. Negative LUC means that farmland is abandoned and becomes native vegetation.
