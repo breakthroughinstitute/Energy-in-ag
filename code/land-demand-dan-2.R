@@ -161,35 +161,54 @@ CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, c
 #change African country names in World_CO2_loss so that they match Africa list
 CO2_loss <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) 
 
-# # Lower estimate of LUC -------------------------------------------------
-# # Leave negative LUC values as-is. This does not reflect shifting cropland. Negative LUC means that farmland is abandoned and becomes native vegetation.
-# 
-# #sum irrigated and rainfed LUC by country, item and scenario
-# LUC <- d %>% dplyr::group_by(Item, CountryName, scenario) %>% dplyr::summarize(total_luc = sum(l, na.rm=T)) %>% 
-#   filter(CountryName %in% Africa) #Only include African countries
-# 
-# #Convert FOFA crop names to MAPSPAM style crop names
-# LUC[LUC=="Bananas"] <- "banps"
-# LUC[LUC =="Barley"] <- "barls"
-# LUC[LUC =="Cassava"] <- "cass"
-# LUC[LUC =="Groundnuts, with shell"] <- "grou"
-# LUC[LUC=="Grain maize"] <- "maiz"
-# LUC[LUC=="Millet"] <- "mill"
-# LUC[LUC=="Other oilseeds"] <- "ooil"
-# LUC[LUC =="Rice, paddy"] <- "rice"
-# LUC[LUC =="Dried pulses"] <- "opul"
-# LUC[LUC =="Potatoes"] <- "pota"
-# LUC[LUC=="Sorghum"] <- "sorg"
-# LUC[LUC =="Sugar beet"] <- "sugb"
-# LUC[LUC=="Sugar cane"] <- "sugc"
-# LUC[LUC=="Wheat"] <- "whea"
-# LUC[LUC=="Sweet potato and yams"] <- "swpy"
-# LUC[LUC=="Soybeans"] <- "soyb"
+# # Calculate total LUC CO2 by country and scenario -------------------------------------------------
+#sum irrigated and rainfed LUC by country, item and scenario, keeping region variable
+LUC <- d %>% dplyr::group_by(Item, CountryName) %>% dplyr::summarize(across(c(b_l, p_l, h_l), sum, na.rm=T), region) %>%
+  filter(CountryName %in% Africa) #Only include African countries
 
-#join co2/ha value to LUC dataframe
-colnames(CO2_Afr_crop2) <- c("Country", "Crop", "CO2/ha")
-# LUC_CO2 <- right_join(LUC, CO2_Afr_crop2, by = c("CountryName" = "Country", "Item" = "Crop")) #should eliminate crops in LUC dataset that do not have corresponding crop match in the CO2_Afr_crop2 dataset (derived from MAPSPAM analysis). 
-# 
+#Convert FOFA crop names to MAPSPAM style crop names
+LUC[LUC=="Bananas"] <- "banps"
+LUC[LUC =="Barley"] <- "barls"
+LUC[LUC =="Cassava"] <- "cass"
+LUC[LUC =="Groundnuts, with shell"] <- "grou"
+LUC[LUC=="Maize"] <- "maiz"
+LUC[LUC=="Millet"] <- "mill"
+LUC[LUC=="Other oilseeds"] <- "ooil"
+LUC[LUC =="Rice, paddy"] <- "rice"
+LUC[LUC =="Dried pulses"] <- "opul"
+LUC[LUC =="Potatoes"] <- "pota"
+LUC[LUC=="Sorghum"] <- "sorg"
+LUC[LUC =="Sugar beet"] <- "sugb"
+LUC[LUC=="Sugar cane"] <- "sugc"
+LUC[LUC=="Wheat"] <- "whea"
+LUC[LUC=="Sweet Potato and Yams"] <- "swpy"
+LUC[LUC=="Soybeans"] <- "soyb"
+LUC[LUC=="Cottonseed"] <- "cott"
+
+#join co2/ha value to LUC dataframe and calculate total LUC CO2 loss/emissions by crop
+LUC_CO2 <- inner_join(LUC, CO2_loss, by = c("CountryName" = "country", "Item" = "crop")) %>%  #should eliminate crops in LUC dataset that do not have corresponding crop match in the CO2_loss dataset (derived from MAPSPAM analysis). 
+  pivot_longer(c(b_l, p_l, h_l), names_to = c("scenario", "x"), names_sep = "_", values_to = "luc_low") %>%  #make long
+  pivot_longer(c(tot_H, tot_S), names_to = c("y", "c_loss_ratio"), names_sep = "_", values_to = "co2_ha") %>%
+  select(-x,-y) %>% 
+  mutate(luc_high = ifelse(luc_low<0, 0, luc_low)) %>% #Calculate more conservative CO2 value where  all negative LUC values = 0. This assumes that arable land expansion does not go into abandoned farmland and that there is no change in vegetation or below-ground carbon.
+  mutate(co2_low = luc_low * co2_ha, co2_high = luc_high*co2_ha) #calculate total co2 loss by multiplying CO2/ha by LUC
+
+#Aggregate LUC CO2 emissions by country
+LUC_CO2_country <- LUC_CO2 %>% group_by(CountryName, scenario, c_loss_ratio) %>% 
+  summarize(co2_low = sum(co2_low, na.rm=T), co2_high = sum(co2_high, na.rm=T)) %>%
+  rename(Country = CountryName)
+
+#Aggregate LUC CO2 emissions by region
+LUC_CO2_region <- LUC_CO2 %>% group_by(region, scenario, c_loss_ratio) %>% 
+  summarize(co2_low = sum(co2_low, na.rm=T), co2_high = sum(co2_high, na.rm=T))
+
+# Save output -------------------------------------------------------------
+write_csv(LUC_CO2,"int_data/luc_co2_country_crop.csv")
+write_csv(LUC_CO2_country,"int_data/luc_co2_country.csv")
+write_csv(LUC_CO2_region,"int_data/luc_co2_region.csv")
+
+
+# Old Rebound analysis ----------------------------------------------------
 #Rebound analysis: Arable land area in 2012 = arable land area in the high scenario.Multiply arable land area 2012 by the rebound effect to calculate new High scenario arable land area and new LUC. Attach carbon loss data (kg/ha). Multiply new LUC values by crop and country specific carbon loss values and sum across all countries and crops to calculate Africa's LUC emissions. 
 #Step 1. Filter and select Africa specific 2012 arable land area, sum irrigated & rainfed arable land areas for each country and crop, and attach carbon loss factors.
 d_rebound <- d %>% select(Item, Element, CountryName, a_2012) %>% filter(CountryName %in% Africa)
@@ -211,7 +230,7 @@ d_rebound[d_rebound$Item=="Growing of wheat",]$Item<- "whea"
 d_rebound[d_rebound$Item=="Growing of sweet potato and yams",]$Item<- "swpy"
 d_rebound[d_rebound$Item=="Growing of soybeans",]$Item<- "soyb"
 colnames(d_rebound) <- c("Crop", "Country", "tot_a_2012")
-d_rebound <- right_join(d_rebound, CO2_Afr_crop2)
+d_rebound <- right_join(d_rebound, CO2_loss)
 
 #Step 2. Multiply arable land 2012 by rebound effects, and calculate new LUC and LUC emissions values
 rebound <- c(1.1, 1.2, 1.3,1.4,1.5, 1.6, 1.7, 1.8, 1.9, 2)
@@ -284,51 +303,4 @@ write.csv(Africa_emis, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Ener
 write.csv(new_input, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/new_input_rebound.csv")
 write.csv(new_LUC_emis, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/new_LUC_emis_rebound.csv")
 write.csv(d_rebound, "~/Google Drive/My Drive/Food & Farming/Energy in ag/Energy and GHG Analysis (2019)/Analysis/energy_ag_analysis/Results/d_rebound.csv")
-# #Multiply by CO2/ha by LUC
-# LUC_CO2 <- mutate(LUC_CO2, CO2 = total_luc * `CO2/ha`) 
-# 
-# #Aggregate CO2 emissions by country (add up all crops)
-# LUC_CO2_country <- LUC_CO2 %>% dplyr::group_by(CountryName, scenario) %>% summarize(luc_co2 = sum(CO2, na.rm=T)) %>% 
-#   rename(Country = CountryName) %>% filter(is.na(scenario)==F) %>% spread(key = scenario, value = luc_co2) 
-# 
-# write.csv(LUC_CO2_country,"LandDemand/CO2_Afr_1_dan.csv")  #save
-# 
-# # Higher estimate of LUC --------------------------------------------------
-# #Make all negative LUC values 0. This assumes that arable land expansion does not go into abandoned farmland and that there is no change in vegetation or below-ground carbon.
-# 
-# #Convert all negative values across all scenarios to 0
-# LUC$total_luc[LUC$total_luc<0] <- 0
-# 
-# #join co2/ha value to LUC dataframe
-# #right join eliminates crops in LUC dataset that do not have corresponding crop match in the CO2_Afr_crop2 dataset
-# LUC_CO2_0 <- right_join(LUC, CO2_Afr_crop2, by = c("CountryName" = "Country", "Item" = "Crop")) 
-# 
-# #Multiply by CO2/ha by LUC
-# LUC_CO2_0 <- mutate(LUC_CO2_0, CO2 = total_luc * `CO2/ha`) 
-# 
-# #Aggregate CO2 emissions by country (add up all crops)
-# LUC_CO2_0_country <- LUC_CO2_0 %>% dplyr::group_by(CountryName, scenario) %>% summarize(luc_co2 = sum(CO2, na.rm=T)) %>% 
-#   rename(Country = CountryName) %>% filter(is.na(scenario)==F) %>% spread(key = scenario, value = luc_co2) 
-# 
-# write.csv(LUC_CO2_0_country,"LandDemand/CO2_Afr_3_dan.csv")  #save
-# 
-# # Combine and Save Lower & Upper LUC Estimates ----------------------------
-# #Upper and lower total LUC by country. Units for LUC are in kg CO2e 
-# LUC_CO2_country <- rename(LUC_CO2_country, Base_lwr = b, Proj_lwr = p, High_lwr = h) #lwr bounds - leaves negative values as is
-# LUC_CO2_0_country <- rename(LUC_CO2_0_country, Base_upr = b, Proj_upr = p, High_upr = h) #upr bounds - negatives values are converted to 0
-# LUC_country_bounds <- right_join(LUC_CO2_0_country, LUC_CO2_country)
-# write.csv(LUC_country_bounds,"LandDemand/LUC_Afr_scenario_dan.csv")
-# 
-# #Upper and lower LUC by region. Units for LUC are in kg CO2e 
-# #Aggregate CO2 emissions by region 
-# LUC_bounds_E <- filter(LUC_country_bounds , Country %in% E_Afr)
-# LUC_bounds_W <- filter(LUC_country_bounds , Country %in% W_Afr)
-# LUC_bounds_C<- filter(LUC_country_bounds , Country %in% C_Afr)
-# LUC_bounds_S<- filter(LUC_country_bounds , Country %in% S_Afr)
-# LUC_bounds_N <- filter(LUC_country_bounds , Country %in% N_Afr)
-# LUC_bounds_Africa <- filter(LUC_country_bounds, Country %in% Africa)
-# 
-# LUC_tot_region <-  as.data.frame(rbind(colSums(LUC_bounds_E[, c(2:7)]), colSums(LUC_bounds_W[, c(2:7)]), colSums(LUC_bounds_C[, c(2:7)]), colSums(LUC_bounds_N[, c(2:7)]),colSums(LUC_bounds_S[, c(2:7)]), colSums(LUC_bounds_Africa[, c(2:7)])))
-# LUC_tot_region$Region <- c("East", "West", "Central","Northern", "Southern", "Africa")
-# 
-# write.csv(LUC_tot_region,"LandDemand/LUC_tot_region_dan.csv")
+

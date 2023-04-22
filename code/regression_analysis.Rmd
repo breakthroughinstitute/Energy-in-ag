@@ -15,7 +15,6 @@ library(ggstance)
 library(tidyverse)
 library(janitor)
 library(naniar)
-library(reshape)
 library(wesanderson)
 ```
 
@@ -436,6 +435,9 @@ for (dependent_variable in var_models$var) {
     }
   }
 }
+#make longer
+reg_fe_results <- reg_fe_results %>% pivot_longer(c(fit, lwr, upr), names_to = "estimate")
+
 ```
 
 
@@ -824,12 +826,12 @@ reg_fe_results <- reg_fe_results %>%
   mutate(dep_var = recode(dep_var, #change var names for resulting table. for recode, format is old = new
                           "fert_use_ha"="f_m", "p_ha"="pest", "en_emiss_ha"="en", "fert_emiss_ha"="f_a", "m_energy_ha" = "m_en")) %>% 
   left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table. join leaves out total Africa region
-  pivot_wider(names_from = dep_var, names_glue = "{dep_var}_{.value}", values_from = c(fit, lwr, upr)) %>% #make wide to multiple columns for fertilizer and pesticide use per ha by emission factors  
+  pivot_wider(names_from = dep_var, values_from = value) %>% #make wide to multiple columns for fertilizer and pesticide use per ha by emission factors  
   mutate(across(starts_with("f_m"),  ~.x*harv_area*fert_ef*kg_to_Gg), #convert kg fertilizer use/ha to Gg CO2e emissions from manufacturing for all fert use
          across(starts_with("pest"),  ~.x*harv_area*pest_ef*tons_to_Gg), #convert tons pesticide use/ha to Gg CO2e emissions from manufacturing for all pesticide use
          across(starts_with("en"),  ~.x*harv_area), #convert Gg CO2e from energy use per ha  to Gg CO2 from total energy use
          across(starts_with("f_a"),  ~.x*harv_area), #convert Gg CO2e from fert application per ha to Gg CO2 from total application
-         across(starts_with("m_"),  ~.x*harv_area*tpes_ef*tons_to_Gg) #convert from Terajoules per ha to gigatons Co2e from total machinery embodied energy
+         across(starts_with("m_"),  ~.x*harv_area*tpes_ef*tons_to_Gg) #convert from Terajoules per ha to gigagran Co2e from total machinery embodied energy
          )
 ```
 
@@ -1578,59 +1580,74 @@ reg_fe_results <- reg_fe_results %>%
 
 
 ```{r Add LUC data to Energy emissions data}
-LUC_Afr_regions <- read.csv("~/Google Drive/My Drive/Food & Farming/Energy in ag/LandDemand/LUC_tot_region_dan2.csv") #bounds by region
+region_key <- c(C_Afr="Central", E_Afr="East", N_Afr = "North", S_Afr="South", W_Afr="West")
 
-#bounds by region #for sensitivity analysis
-#Interested in the upper bound of LUC emissions as this represents a less conservative LUC reduction.Can eliminate lower bound estimates where LUC reductions would be higher since cropland is being converted back to native vegetation. The LUC emissions are in kg CO2 equivalents.
-#LUC_Afr_regions <- LUC_tot_region for sensitivity analysis
+convert_luc_co2 <- function(x){return(x * kg_to_Gg/38)} # convert to Gg and divide by 38, the number of years between 2012 and 2050, this division annualizes the emissions
 
-#remove extra columns, demonstrating quicker way to do it. Only include higher LUC emissions, not lower bounds,for a more conservative emissions reduction.
-LUC_Afr_regions <- dplyr::select(LUC_Afr_regions, -c(X, High_lwr, Proj_lwr,Base_lwr)) 
+luc_co2_region <- read_csv("int_data/luc_co2_region.csv") %>%  #read in kg CO2e from LUC by region and scenario, with low values calculated allowing for negative LUC for crops (i.e. restoration) and high values setting all negative LUC to 0.
+  mutate(region = recode(region, !!!region_key)) %>%  #rename regions for joining
+  rename(luc_co2_low = co2_low, luc_co2_high=co2_high) %>%  #clarify column names
+  mutate(across(c(luc_co2_low, luc_co2_high), convert_luc_co2)) #convert to Gg CO2/yr
 
-LUC_Afr_regions <- as.data.frame(LUC_Afr_regions)
+all_emiss <- full_join(reg_fe_results, luc_co2_region) %>%  #join input and LUC emissions
+  mutate(tot_input_co2 = en + f_m + f_a + pest + m_en,  
+    tot_co2_high = tot_input_co2 + luc_co2_high,
+    tot_co2_low = tot_input_co2 + luc_co2_low)
 
-LUC_Afr_regions <- melt(LUC_Afr_regions, id.vars = "Region")
-#match dataframe structure of Energy_emis
-#LUC_Afr_regions %>% spread(key = Region, value = value) #match dataframe structure of Energy_emis
-colnames(LUC_Afr_regions) <- c("Region", "Scenario", "LUC")
-LUC_Afr_regions$Scenario <- as.character(LUC_Afr_regions$Scenario)
-LUC_Afr_regions$Region <- as.character(LUC_Afr_regions$Region)
-LUC_Afr_regions$Scenario[grepl("Base",LUC_Afr_regions$Scenario)] <-"Baseline"
-LUC_Afr_regions$Scenario[grepl("Proj",LUC_Afr_regions$Scenario)] <-"Projected"
-LUC_Afr_regions$Region[grepl("Northern", LUC_Afr_regions$Region)] <-"North"
-LUC_Afr_regions$Scenario[grepl("High_upr",LUC_Afr_regions$Scenario)] <-"High"
- 
-#Calculate total energy emissions by region and scenario
-Energy_emis$variable <- rownames(Energy_emis)
-rownames(Energy_emis) <- NULL
-B <- filter(Energy_emis, grepl("_base", variable))
-P <- filter(Energy_emis, grepl("proj", variable))
-H_alt <- filter(Energy_emis, grepl("_h_alt", variable))
+write_csv(all_emiss,"results/all_emiss_region.csv")
 
-Energy_b <- t(colSums(B[, c(1:6)])) #aggregates emissions across all energy sources for each region
-rownames(Energy_b) <- "Baseline"
-Energy_p <- t(colSums(P[, c(1:6)]))
-rownames(Energy_p) <- "Projected"
-Energy_h_alt <-  t(colSums(H_alt[, c(1:6)]))
-rownames(Energy_h_alt) <- "High"
-tot_E <- rbind(Energy_b,Energy_p,Energy_h_alt )
-tot_E <- melt(tot_E)
-colnames(tot_E) <- c("Scenario", "Region", "Energy")
-tot_E$Region<- as.character(tot_E$Region)
-tot_E$Region[grepl("Africa",tot_E$Region)] <-"Africa"
 
-#Calculate total GHG
-GHG <- right_join(LUC_Afr_regions, tot_E)
-GHG[is.na(GHG)] <- 0 #Convert NAs in LUC to 0 (applies to high scenario)
-GHG[GHG < 0] <- 0 #convert negative values to 0
+# # bounds by region #for sensitivity analysis
+# # Interested in the upper bound of LUC emissions as this represents a less conservative LUC reduction.Can eliminate lower bound estimates where LUC reductions would be higher since cropland is being converted back to native vegetation. The LUC emissions are in kg CO2 equivalents.
+# # LUC_Afr_regions <- LUC_tot_region for sensitivity analysis
+# # 
+# #remove extra columns, demonstrating quicker way to do it. Only include higher LUC emissions, not lower bounds,for a more conservative emissions reduction.
+# LUC_Afr_regions <- dplyr::select(LUC_Afr_regions, -c(X, High_lwr, Proj_lwr,Base_lwr)) 
+# 
+# LUC_Afr_regions <- as.data.frame(LUC_Afr_regions)
+# 
+# LUC_Afr_regions <- melt(LUC_Afr_regions, id.vars = "Region")
+# #match dataframe structure of Energy_emis
+# #LUC_Afr_regions %>% spread(key = Region, value = value) #match dataframe structure of Energy_emis
+# colnames(LUC_Afr_regions) <- c("Region", "Scenario", "LUC")
+# LUC_Afr_regions$Scenario <- as.character(LUC_Afr_regions$Scenario)
+# LUC_Afr_regions$Region <- as.character(LUC_Afr_regions$Region)
+# LUC_Afr_regions$Scenario[grepl("Base",LUC_Afr_regions$Scenario)] <-"Baseline"
+# LUC_Afr_regions$Scenario[grepl("Proj",LUC_Afr_regions$Scenario)] <-"Projected"
+# LUC_Afr_regions$Region[grepl("Northern", LUC_Afr_regions$Region)] <-"North"
+# LUC_Afr_regions$Scenario[grepl("High_upr",LUC_Afr_regions$Scenario)] <-"High"
+#  
+# #Calculate total energy emissions by region and scenario
+# Energy_emis$variable <- rownames(Energy_emis)
+# rownames(Energy_emis) <- NULL
+# B <- filter(Energy_emis, grepl("_base", variable))
+# P <- filter(Energy_emis, grepl("proj", variable))
+# H_alt <- filter(Energy_emis, grepl("_h_alt", variable))
+# 
+# Energy_b <- t(colSums(B[, c(1:6)])) #aggregates emissions across all energy sources for each region
+# rownames(Energy_b) <- "Baseline"
+# Energy_p <- t(colSums(P[, c(1:6)]))
+# rownames(Energy_p) <- "Projected"
+# Energy_h_alt <-  t(colSums(H_alt[, c(1:6)]))
+# rownames(Energy_h_alt) <- "High"
+# tot_E <- rbind(Energy_b,Energy_p,Energy_h_alt )
+# tot_E <- melt(tot_E)
+# colnames(tot_E) <- c("Scenario", "Region", "Energy")
+# tot_E$Region<- as.character(tot_E$Region)
+# tot_E$Region[grepl("Africa",tot_E$Region)] <-"Africa"
+# 
+# #Calculate total GHG
+# GHG <- right_join(LUC_Afr_regions, tot_E)
+# GHG[is.na(GHG)] <- 0 #Convert NAs in LUC to 0 (applies to high scenario)
+# GHG[GHG < 0] <- 0 #convert negative values to 0
 
 #Units - convert from gigagrams to gigatons or megatons
-Gg_to_Gt <- 1/1000000 #1 Gigaton/1000000 Gigagrams for converting Energy emissions
-GHG$LUC <- (GHG$LUC * kg_to_Gg)/10 #Cropland change was calculated based off 2000 and 2010 data,*also divided by 10 in world carbon loss file 
-GHG$LUC <-  (GHG$LUC * Gg_to_Gt)/38 #38 is the number of years between 2012 and 2050, this division annualizes the emissions
-GHG$Energy <- GHG$Energy * Gg_to_Gt
-GHG$GHG <- GHG$LUC + GHG$Energy
-write.csv(GHG,"~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/GHG_emis.csv")
+# Gg_to_Gt <- 1/1000000 #1 Gigaton/1000000 Gigagrams for converting Energy emissions
+# GHG$LUC <- (GHG$LUC * kg_to_Gg)
+# GHG$LUC <-  (GHG$LUC * Gg_to_Gt)/38 #38 is the number of years between 2012 and 2050, this division annualizes the emissions
+# GHG$Energy <- GHG$Energy * Gg_to_Gt
+# GHG$GHG <- GHG$LUC + GHG$Energy
+# write.csv(GHG,"~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/GHG_emis.csv")
 
 
 ```
