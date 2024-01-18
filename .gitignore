@@ -13,10 +13,15 @@ MAPSPAM/
 FAOSTAT/
 Internal notes.md
 .html
+.qgz
 manuscript/
 code/old_code/
- 
 #could add back in by removing from ignore file
 int_data/
 raw_data/
 results/
+key literature and references/
+Energy-Ag (old?)/
+code/calculate_calories_per_ha_cropland.nb.html
+code/QGIS/calculate_mill.qgz
+calculate_calories_per_ha_cropland.nb.html
