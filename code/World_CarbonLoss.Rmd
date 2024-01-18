@@ -6,7 +6,7 @@ output: html_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 
-#Combine output from QGIS into one dataframe
+#Combine LUC and soil & veg carbon content under native vegetation  output from QGIS into one dataframe
 f <- paste0("int_data/qgis_output/", list.files(path = "int_data/qgis_output/", pattern = '*.xlsx', recursive=T))
 df.list <- lapply(f,readxl::read_excel)
 f <- sub("int_data/qgis_output/", "", f)
@@ -15,49 +15,67 @@ carbon <- bind_rows(df.list, .id = "id")
 carbon <- select(carbon, id, lucsum, soilsum, vegsum , ADMIN, ADM0_A3, NAME, NAME_LONG, BRK_NAME)
 ```
 
+```{r Add crop carbon to dataframe}
+#import carbon content for crops and clean up crop names, making consistent withn QGIS names
+crop_carbon <- read_csv("raw_data/carbon_in_crop_vegetation_searchinger_2018.csv") %>% 
+  rename(cstock = `Average Carbon Stocks in Agricultural Vegetation (Mg C/ ha)`)
+crop_crosswalk <- read_csv("raw_data/crop_name_crosswalk.csv", na = "#N/A") %>% filter(is.na(spam2000) == FALSE)
+
+#make names of crop column in crop_carbon dataframe consistent with crop names in id column of carbon dataframe
+crop_carbon <- crop_carbon %>% left_join(crop_crosswalk, by = join_by(Crop == searchinger_crop_carbon))
+
+#calculate average carbon content for banana and plantain combined, and sweet potato and yam combined to match with SPAM2000 names
+crop_carbon <- crop_carbon %>% filter(is.na(spam2000)==F) %>% group_by(spam2000) %>% summarise(cstock = mean(cstock)) 
+
+#join crop carbon stock data to primary carbon/LUC dataframe
+carbon <- left_join(carbon, crop_carbon, by = join_by(id == spam2000))
+```
+
 ```{r Weighted Avg. Veg & Soil Carbon densities by crop}
-#input is tC for soilsum and vegsum, and ha for lucsum; we calculate avg C levels by dividing soil & veg C by luc values, and convert to kg CO2
+#input is tC for soilsum and vegsum, and ha for lucsum; we calculate avg C levels by dividing soil & veg C by luc values, and convert to kg CO2. To calculate change in vegetative carbon, we subtract vegetative carbon stocks under crop production from carbon stocks under native vegetation, per Searchinger 2018 workbook: "To estimate carbon stocks under agricultural vegetation, the user can consult Table 4-3" 
 
 c_to_co2 <- 44/12
 tons_to_kg <- 1000
 pct_soil_loss_h <- .25 #percent of soil carbon lost when converted to cropland, per Houghton et al   
 pct_soil_loss_s <- .4 #percent of soil carbon lost when converted to cropland, per Searchinger et al 2018
 
+#create continent-level dataframe with average carbon value across the continent for each crop
+afr_avg_carbon <- carbon %>% 
+  filter(is.na(cstock)==F) %>% #remove crops with missing crop carbon data
+  group_by(id) %>% 
+  summarise(soilH = sum(soilsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE)  * mean(c_to_co2) * tons_to_kg * pct_soil_loss_h,
+            soilS = sum(soilsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE)  * mean(c_to_co2) * tons_to_kg * pct_soil_loss_s,
+            veg = (sum(vegsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE) - mean(cstock))  * c_to_co2 * tons_to_kg
+  )
+
+#create country-level dataframe with column for each crop
 carbon <- carbon %>%
-        mutate(soilH = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
-               soilS = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
-               veg = ((vegsum/lucsum) * c_to_co2 * tons_to_kg)
-               ) %>%
-        select(-c(lucsum, soilsum, vegsum)) %>% 
-        pivot_wider(names_from = id,
-                    names_glue = "{id}_{.value}",
-                    values_from = c(soilH, soilS, veg))
-```
+  filter(is.na(cstock)==F) %>% #remove crops with missing crop carbon data
+  mutate(soilH = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
+         soilS = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
+         veg = (((vegsum/lucsum)-cstock) * c_to_co2 * tons_to_kg) #calculate avg tC/ha under native veg, then subtract vegetative carbon stocks
+         ) %>%
+  select(-c(lucsum, soilsum, vegsum, cstock))
 
-```{r Gap fill}
-#Replace 0's with NAs. Then fill missing values with avg CO2 loss across all countries for the given crop (essentially fill missing vaues with average of non-zero CO2 loss values across all countries for given crop's (veg or soil) column of CO2 emissions. 
-carbon[carbon == 0] <- NA 
-for (i in 6:ncol(carbon)) {
-  for (j in 1:nrow(carbon)) {
-    ifelse(is.na(carbon[j,i]), carbon[j,i] <- mean(as.numeric(unlist(carbon[,i])),na.rm = TRUE), carbon[j,i])
-  }
-}
-```
+#replace 0's and NAs in carbon dataframe with the corresponding values from the afr_avg_carbon dataframe
+carbon[carbon == 0] <- NA #set 0's to NA
 
-```{r Calculate total carbon loss values}
-carbon <- 
-  carbon %>% 
-  pivot_longer(banps_soilH:whea_veg, names_to = c("crop", "var"), names_pattern = "(.*)_(.*.)") %>% 
-  pivot_wider(names_from = var, values_from = value) %>% 
-  mutate(tot_H = soilH+veg, 
-       tot_S = soilS+veg) %>% 
-  select(-c(soilH, soilS, veg))
+carbon_interpolated <- carbon %>% 
+  left_join(afr_avg_carbon, by = "id", suffix = c("", ".avg")) %>% # Join the country and continent-level dataframes
+  mutate( 
+    soilH = ifelse(is.nan(soilH), soilH.avg, soilH), #replace NAs with the continent average
+    soilS = ifelse(is.nan(soilS), soilS.avg, soilS), #replace NAs with the continent average
+    veg = ifelse(is.nan(veg), veg.avg, veg) #replace NAs with the continent average
+  ) %>%
+  mutate(tot_H = soilH+veg, #calculate total carbon loss (kg CO2e/ha) for each crop including soil + veg
+         tot_S = soilS+veg) %>% 
+  select(-c(soilH, soilS, veg), -matches(".avg")) # Removing the average columns after replacement and original soil and veg columns
 ```
 
 
 ```{r Save}
-write_csv(x = carbon, file = "int_data/LUC_CO2_crops.csv")
+write_csv(x = carbon_interpolated, file = "int_data/LUC_CO2_crops.csv")
 
 #clean
-rm(carbon, i, j, df.list, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
+rm(carbon, crop_carbon, afr_avg_carbon, df.list, c_to_co2, tons_to_kg, pct_soil_loss_h,pct_soil_loss_s, f)
 ```
