@@ -79,13 +79,13 @@ d$Item <- dplyr::recode(d$Item,"Growing of bananas" = "Bananas", "Growing of bar
 
 #join kcal/ton to primary dataframe
 #list crops from FOFA and kcal excluded
-unique(anti_join(d, kcal, by = c("Item" = "crop"))$Item)
+fofa_excluded <- unique(anti_join(d, kcal, by = c("Item" = "crop"))$Item) #coffee, rubber, tea, tobacco, "other fibre crops", cocoa beans, and "other crops"
 
-anti_join(kcal, d, by = c("crop" = "Item")) %>% 
-    filter(!crop %in% c(cereals, cit, fruit, oilseeds, pulses, roots, swp, veg)) 
+kcal_excluded <- anti_join(kcal, d, by = c("crop" = "Item")) %>% 
+    filter(!crop %in% c(cereals, cit, fruit, oilseeds, pulses, roots, swp, veg)) %>% select(crop) %>% pull()
 #indicates that nuts, green maize, and mushrooms are omitted
     
-d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal converions
+d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal conversions
 
 #multiply all production columns by kcal/ton
 d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
