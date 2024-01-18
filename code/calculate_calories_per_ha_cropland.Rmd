@@ -84,5 +84,6 @@ tot_prod <- prod %>%
 
 ```{r Save}
 write_csv(tot_prod, "../int_data/prod.cropland.csv")
+write_csv(as_tibble(unique(prod$crop)), "../results/crops_included_in_calorie_per_ha_calc.csv")
 rm(list = ls())
 ```
