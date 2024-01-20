@@ -203,12 +203,17 @@ LUC_CO2 <- inner_join(LUC, CO2_loss, by = c("CountryName" = "country", "Item" = 
   pivot_longer(c(b_l, p_l, h_l), names_to = c("scenario", "x"), names_sep = "_", values_to = "luc") %>%  #make long
   pivot_longer(c(tot_H, tot_S), names_to = c("y", "c_loss_ratio"), names_sep = "_", values_to = "co2_ha") %>%
   select(-x,-y) %>%
-  mutate(co2 = luc * co2_ha) #calculate total co2 loss by multiplying CO2/ha by LUC
+  mutate(co2_low = luc * co2_ha, #calculate total co2 loss by multiplying CO2/ha by LUC
+         co2_high = ifelse(luc<0, 0, luc)*co2_ha)  
+
+#The last line above calculates a conservative LUC CO2 value where all negative LUC values, for each crop and country combination, are set to 0. 
+#This is meant to model a scenario where arable land expansion does *not* go into abandoned farmland. 
+#We do not account in this study for restoration, revegetation, or shifting cropland e.g. where wheat area in Algeria is abandoned and used to acommodate an increase in maize or rice.
 
 #Aggregate LUC CO2 emissions by country
 LUC_CO2_country <- LUC_CO2 %>% group_by(CountryName, scenario, c_loss_ratio, region) %>% 
-  summarize(co2_low = sum(co2, na.rm=T)) %>%
-  mutate(co2_high = ifelse(co2_low<0, 0, co2_low)) %>% #Calculate more conservative CO2 value where all negative LUC values = 0. This assumes that arable land expansion does not go into abandoned farmland and that there is no change in vegetation or below-ground carbon.
+  summarize(co2_low = sum(co2_low, na.rm=T), 
+            co2_high = sum(co2_high, na.rm=T)) %>% 
   rename(Country = CountryName)
 
 #Aggregate LUC CO2 emissions by region
