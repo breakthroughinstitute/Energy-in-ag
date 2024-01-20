@@ -1,7 +1,7 @@
 ---
-title: "Advanced Regression for Emissions Predictions"
-author: "Saloni Shah"
-date: "11/06/2020"
+title: "Regression Analysis for Emissions Predictions"
+authors: "Saloni Shah, Dan Blaustein-Rejto "
+date: "originally started 11/06/2020; last modified 1/19/2024"
 output: html_document
 ---
 #SETUP
@@ -25,9 +25,13 @@ pest_use <- read_csv("raw_data/faostat/pest_use.csv") %>% select(Country = Area,
 
 #on-farm energy use emissions - converting to CO2e and subtracting fisheries energy emissions from total on-farm energy emissions
 energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>% 
+  select(-Domain, -Unit) %>% #remove to avoid creating extra rows when pivoting since Units missing when value is NA
   pivot_wider(names_from = Element, values_from = Value) %>% 
-  mutate(tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  #multiply by AR5 GWP values FAO uses
-  select(Country = Area, Year, tot_co2e, Item) %>% distinct() %>%  #remove duplicates of Bhutan, Hong Kong and several other countries 
+  mutate(`Emissions (CH4)` = coalesce(`Emissions (CH4)`,0),  #replace NA with 0 in each emissions type
+         `Emissions (N2O)` = coalesce(`Emissions (N2O)`,0),
+         `Emissions (CO2)` = coalesce(`Emissions (CO2)`,0), 
+         tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  # calculate total energy emissions, multiplying by AR5 GWP values FAO uses
+  select(Country = Area, Year, tot_co2e, Item) %>%
   pivot_wider(names_from = Item, values_from = tot_co2e) %>% 
   mutate(en_emiss = `Total Energy` -coalesce(`Energy used in fishery`,0)) %>%  #calculate farm emissions as total - fishery 
   mutate(en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
