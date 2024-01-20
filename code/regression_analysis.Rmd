@@ -26,15 +26,13 @@ pest_use <- read_csv("raw_data/faostat/pest_use.csv") %>% select(Country = Area,
 #on-farm energy use emissions - converting to CO2e and subtracting fisheries energy emissions from total on-farm energy emissions
 energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>% 
   select(-Domain, -Unit) %>% #remove to avoid creating extra rows when pivoting since Units missing when value is NA
+  mutate(Value = coalesce(Value,0)) %>% #replace NA with 0. Avoids total energy emissions being NA when just one component is NA
   pivot_wider(names_from = Element, values_from = Value) %>% 
-  mutate(`Emissions (CH4)` = coalesce(`Emissions (CH4)`,0),  #replace NA with 0 in each emissions type
-         `Emissions (N2O)` = coalesce(`Emissions (N2O)`,0),
-         `Emissions (CO2)` = coalesce(`Emissions (CO2)`,0), 
-         tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  # calculate total energy emissions, multiplying by AR5 GWP values FAO uses
+  mutate(tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  # calculate total energy emissions, multiplying by AR5 GWP values FAO uses
   select(Country = Area, Year, tot_co2e, Item) %>%
   pivot_wider(names_from = Item, values_from = tot_co2e) %>% 
-  mutate(en_emiss = `Total Energy` -coalesce(`Energy used in fishery`,0)) %>%  #calculate farm emissions as total - fishery 
-  mutate(en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
+  mutate(en_emiss = `Total Energy` - `Energy used in fishery`,  #calculate farm emissions as total - fishery 
+         en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
   select(Country, Year, en_emiss)
 #units: kilotonnes (i.e. gigagram) CO2e.  timeframe: 1970-2020
 
@@ -43,9 +41,20 @@ energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>%
 m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>% 
   select(Country = Area, Year, Item, Value) %>% 
   pivot_wider(names_from = Item, values_from = Value) %>% 
-  mutate(m_energy = rowSums(across(c(`Gas-Diesel oil`, -`Gas-diesel oils used in fisheries`), na.rm=T)) * .40) %>% 
+  mutate(m_energy = (`Gas-Diesel oil` -coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4) %>% 
   select(Country, Year, m_energy)
 #units: Terajoules. #timeframe 1970-2020
+
+
+library(dplyr)
+library(tidyr)
+library(readr)
+
+m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>% 
+  select(Country = Area, Year, Item, Value) %>% 
+  pivot_wider(names_from = Item, values_from = Value) %>% 
+  mutate(m_energy = (`Gas-Diesel oil` - coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4)
+
 
 #fertilizer application emissions
 fert_emiss <- read_csv("raw_data/faostat/fert_use_emissions.csv") %>% select(Country = Area, Year, fert_emiss = Value)
