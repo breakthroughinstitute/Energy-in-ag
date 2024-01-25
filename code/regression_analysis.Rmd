@@ -172,7 +172,6 @@ reg_W_aggregate <- aggregate_reg(reg_W, "West")
 reg_C_aggregate <- aggregate_reg(reg_C, "Central")
 reg_S_aggregate <- aggregate_reg(reg_S, "South")
 reg_N_aggregate <- aggregate_reg(reg_N, "North")
-
 ```
 
 ```{r Load in other countries' data and join it with African regions data}
@@ -197,38 +196,10 @@ reg_all_countries <- naniar::replace_with_na_all(data = reg_all_countries, condi
 #   main = "Histogram of yield",
 #   breaks = sqrt(nrow(reg_all_countries))) # set number of bins
 # #Barbados, Kuwait, Belgium, Martinque occupy many of the highest values
-# #higher than 2*10^7 is an outlier based on historgram and barplot
+# #higher than ~2*10^7 is an outlier based on historgram and barplot
 # sum(reg_all_countries$yield >= 20000000, na.rm=T) #32 entries
 # sum(reg_all_countries$yield >= 20000000, na.rm=T)/nrow(reg_all_countries) #~.5% of total entries
 filter_reg <- filter(reg_all_countries, reg_all_countries$yield < 20000000)
-
-##data on outliers for inputs
-# summary(reg_all_countries$fert_emiss)
-# boxplot(reg_all_countries$fert_emiss)
-# hist(reg_all_countries$fert_emiss,
-#   xlab = "fuel",
-#   main = "Histogram of fuel",
-#   breaks = sqrt(nrow(reg_all_countries)))
-# 
-# summary(reg_all_countries$fert_use)
-# boxplot(reg_all_countries$fert_use)
-# hist(reg_all_countries$fert_use,
-#   xlab = "fert_use",
-#   main = "Histogram of fuel",
-#   breaks = sqrt(nrow(reg_all_countries)))
-# 
-# boxplot(reg_all_countries$pesticides_total)
-# hist(reg_all_countries$pesticides_total,
-#   xlab = "pesticides",
-#   main = "Histogram of fuel",
-#   breaks = sqrt(nrow(reg_all_countries)))
-# 
-# summary(reg_all_countries$fuel_emissions)
-# hist(reg_all_countries$fuel_emissions,
-#   xlab = "fuel",
-#   main = "Histogram of fuel",
-#   breaks = sqrt(nrow(reg_all_countries)))
-
 ```
 
 #Regression Code
@@ -256,21 +227,20 @@ afr_fert_use_ols <- lm(africa_level_reg, formula = log(fert_use_ha) ~ log(yield)
 afr_m_energy_ols <- lm(africa_level_reg, formula = log(m_energy_ha) ~ log(yield) + factor(country))#Energy embodied in machinery OLS regression
 ```
 
-
 ```{r Sanity Check on parameters - optional for running}
 #Check to see that that the model fitted values match the log(actual values) in the regression dataset, values should fall around 1:1 line
 
-# plot(x = log(na.omit(filter_reg$p_ha)), y = p.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of pesticide/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# plot(x = log(na.omit(filter_reg$p_ha)), y = p_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of pesticide/ha values")
+# abline(b=1, a=0) #values fall around this 1:1 line
 # 
-# plot(x = log(na.omit(filter_reg$en_emiss_ha)), y = fuel.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
-#  abline(b=1, a=0) #values fall around this 1:1 line 
+# plot(x = log(na.omit(filter_reg$en_emiss_ha)), y = fuel_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
+#  abline(b=1, a=0) #values fall around this 1:1 line
 # 
-# plot(x = log(na.omit(filter_reg$fert_emiss_ha)), y = syn_n.ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# plot(x = log(na.omit(filter_reg$fert_emiss_ha)), y = syn_n_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
+# abline(b=1, a=0) #values fall around this 1:1 line
 # 
-# plot(log(na.omit(filter_reg$fert_use_ha)), fert_use.ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
-# abline(b=1, a=0) #values fall around this 1:1 line 
+# plot(log(na.omit(filter_reg$fert_use_ha)), fert_use_ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
+# abline(b=1, a=0) #values fall around this 1:1 line
 ```
 
 ```{r Sensitivity analysis running OLS with data filtered to last 20 years}
