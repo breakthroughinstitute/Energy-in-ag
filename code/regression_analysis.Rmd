@@ -73,13 +73,13 @@ reg <- full_join(energy_emiss, fert_emiss) %>% full_join(fert_use) %>% full_join
 reg <- reg %>% group_by(Country) %>% arrange(Country, Year) %>% fill(en_emiss:cropland)
 
 #Calculate each emissions or input use per ha 
-reg$en_emiss_ha <-reg$en_emiss/reg$cropland #units are gigagrams CO2e/ha
-reg$p_ha <- reg$pest_use/reg$cropland #units are tons applied/ha
-reg$fert_emiss_ha <- reg$fert_emiss/reg$cropland#units are gigagrams CO2e/ha
-reg$m_energy_ha <- reg$m_energy/reg$cropland#units are Terajoules/ha
+reg$en_emiss_ha <-reg$en_emiss/reg$cropland #units are gigagrams CO2e/ha of cropland (not harvested area)
+reg$p_ha <- reg$pest_use/reg$cropland #units are tons applied/ha of cropland
+reg$fert_emiss_ha <- reg$fert_emiss/reg$cropland#units are gigagrams CO2e/ha of cropland
+reg$m_energy_ha <- reg$m_energy/reg$cropland#units are Terajoules/ha of cropland
 
 #calculate yield
-reg$yield <-  reg$tot_kcal/reg$cropland
+reg$yield <-  reg$tot_kcal/reg$cropland #units are kilocal/ha of cropland 
 ```
 
 ```{r Clean Data }
@@ -312,11 +312,11 @@ reg_fe_results <- reg_fe_results %>%
                           "fert_use_ha"="f_m", "p_ha"="pest", "en_emiss_ha"="en", "fert_emiss_ha"="f_a", "m_energy_ha" = "m_en")) %>% 
   left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table. 
   pivot_wider(names_from = dep_var, values_from = value) %>% #make wide to multiple columns for fertilizer and pesticide use per ha by emission factors  
-  mutate(across(starts_with("f_m"),  ~.x*harv_area*fert_ef*kg_to_Gg), #convert kg fertilizer use/ha to Gg CO2e emissions from manufacturing for all fert use
-         across(starts_with("pest"),  ~.x*harv_area*pest_ef*tons_to_Gg), #convert tons pesticide use/ha to Gg CO2e emissions from manufacturing for all pesticide use
-         across(starts_with("en"),  ~.x*harv_area), #convert Gg CO2e from energy use per ha  to Gg CO2 from total energy use
-         across(starts_with("f_a"),  ~.x*harv_area), #convert Gg CO2e from fert application per ha to Gg CO2 from total application
-         across(starts_with("m_"),  ~.x*harv_area*tpes_ef*tons_to_Gg) #convert from Terajoules per ha to gigagran Co2e from total machinery embodied energy
+  mutate(across(starts_with("f_m"),  ~.x * arable_area * fert_ef * kg_to_Gg), #convert kg fertilizer use/ha to Gg CO2e emissions from manufacturing for all fert use
+         across(starts_with("pest"),  ~.x * arable_area * pest_ef * tons_to_Gg), #convert tons pesticide use/ha to Gg CO2e emissions from manufacturing for all pesticide use
+         across(starts_with("en"),  ~.x * arable_area), #convert Gg CO2e from energy use per ha  to Gg CO2 from total energy use
+         across(starts_with("f_a"),  ~.x * arable_area), #convert Gg CO2e from fert application per ha to Gg CO2 from total application
+         across(starts_with("m_"),  ~.x * arable_area * tpes_ef * tons_to_Gg) #convert from Terajoules per ha to gigagran Co2e from total machinery embodied energy
          )
 ```
 
