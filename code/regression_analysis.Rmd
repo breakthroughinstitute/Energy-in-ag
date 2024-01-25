@@ -243,15 +243,6 @@ afr_m_energy_ols <- lm(africa_level_reg, formula = log(m_energy_ha) ~ log(yield)
 # abline(b=1, a=0) #values fall around this 1:1 line
 ```
 
-```{r Sensitivity analysis running OLS with data filtered to last 20 years}
-#filter_reg_yrs <- filter(filter_reg, filter_reg$year > 1996) #sensitivity analysis - use last 20 years of data
-#p.ols <- lm(filter_reg_yrs , formula = log(p_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
-#fuel.ols <- lm(filter_reg_yrs , formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #last 20 years sensitivity
-#syn_n.ols <- lm(filter_reg_yrs, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
-#fert_use.ols <- lm(filter_reg_yrs, formula = log(fert_use_ha) ~ log(yield) + factor(country))
-#m_en.ols <- lm(filter_reg_yrs, formula = log(m_energy_ha) ~ log(yield) + factor(country))
-```
-
 ```{r Calculate predicted input use per ha by input, scenario and region}
 #fixed effect regression results
 reg_fe <- function(dependent_variable, scenario, region){
