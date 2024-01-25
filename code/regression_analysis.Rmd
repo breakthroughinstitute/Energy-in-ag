@@ -1,7 +1,7 @@
 ---
 title: "Regression Analysis for Emissions Predictions"
 authors: "Saloni Shah, Dan Blaustein-Rejto "
-date: "originally started 11/06/2020; last modified 1/19/2024"
+date: "originally started 11/06/2020; last modified 1/24/2024"
 output: html_document
 ---
 #SETUP
@@ -26,12 +26,11 @@ pest_use <- read_csv("raw_data/faostat/pest_use.csv") %>% select(Country = Area,
 #on-farm energy use emissions - converting to CO2e and subtracting fisheries energy emissions from total on-farm energy emissions
 energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>% 
   select(-Domain, -Unit) %>% #remove to avoid creating extra rows when pivoting since Units missing when value is NA
-  mutate(Value = coalesce(Value,0)) %>% #replace NA with 0. Avoids total energy emissions being NA when just one component is NA
   pivot_wider(names_from = Element, values_from = Value) %>% 
   mutate(tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  # calculate total energy emissions, multiplying by AR5 GWP values FAO uses
   select(Country = Area, Year, tot_co2e, Item) %>%
   pivot_wider(names_from = Item, values_from = tot_co2e) %>% 
-  mutate(en_emiss = `Total Energy` - `Energy used in fishery`,  #calculate farm emissions as total - fishery 
+  mutate(en_emiss = ifelse(is.na(`Total Energy`), NA, `Total Energy` - coalesce(`Energy used in fishery`, 0)),#calculate farm emissions as total - fishery, ensuring that the result is not NA just because Energy used in fishery is 
          en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
   select(Country, Year, en_emiss)
 #units: kilotonnes (i.e. gigagram) CO2e.  timeframe: 1970-2020
@@ -41,10 +40,10 @@ energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>%
 m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>% 
   select(Country = Area, Year, Item, Value) %>% 
   pivot_wider(names_from = Item, values_from = Value) %>% 
-  mutate(m_energy = (`Gas-Diesel oil` -coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4) %>% 
+  mutate(m_energy = (`Gas-Diesel oil` -coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4,
+         m_energy = ifelse(m_energy<0,NA,m_energy)) %>%  #replace negative values w/ NA 
   select(Country, Year, m_energy)
 #units: Terajoules. #timeframe 1970-2020
-
 
 #fertilizer application emissions
 fert_emiss <- read_csv("raw_data/faostat/fert_use_emissions.csv") %>% select(Country = Area, Year, fert_emiss = Value)
@@ -68,23 +67,19 @@ scenarios <- read_csv("int_data/scenarios.csv") %>%  #yields are in kcal/ha
 
 ```{r Calculate total fuel emissions, calculate emissions per ha for each input }
 #join datasets
-reg <- full_join(energy_emiss, fert_emiss) %>% full_join(fert_use) %>% full_join(fert_use_per_ha) %>% full_join(pest_use) %>% full_join(m_energy) %>% full_join(prod, by =  c("Country" = "country", "Year" = "year"))
+reg <- full_join(energy_emiss, fert_emiss) %>% full_join(fert_use) %>% full_join(fert_use_per_ha) %>%full_join(pest_use) %>% full_join(m_energy) %>% full_join(prod, by =  c("Country" = "country", "Year" = "year"))
 
 #Fill in missing data for each column by country. Apply the last one carried forward method to each column in the dataframe (called reg below), grouping by country so that if the first observation is NA, the function doesn't replace with observation from different country. Will not fill in data for previous years.
 reg <- reg %>% group_by(Country) %>% arrange(Country, Year) %>% fill(en_emiss:cropland)
 
 #Calculate each emissions or input use per ha 
-reg$en_emiss_ha <-reg$en_emiss/reg$cropland #units are gigagrams/ha
+reg$en_emiss_ha <-reg$en_emiss/reg$cropland #units are gigagrams CO2e/ha
 reg$p_ha <- reg$pest_use/reg$cropland #units are tons applied/ha
-reg$fert_emiss_ha <- reg$fert_emiss/reg$cropland#units are gigagrams/ha
+reg$fert_emiss_ha <- reg$fert_emiss/reg$cropland#units are gigagrams CO2e/ha
 reg$m_energy_ha <- reg$m_energy/reg$cropland#units are Terajoules/ha
 
-#reg calc yield
+#calculate yield
 reg$yield <-  reg$tot_kcal/reg$cropland
-# plot(reg$yield, reg$fert_emiss_ha, main = "Yield vs. Syn N emissions per ha")
-# plot(reg$yield, reg$fert_use_ha, main = "Yield vs. Syn N use per ha")
-# plot(reg$yield, reg$en_emiss_ha, main = "Yield vs. On farm fuel emissions per ha")
-# plot(reg$yield, reg$p_ha, main = "Yield vs. Pesticides use per ha")
 ```
 
 ```{r Clean Data }
@@ -109,20 +104,20 @@ reg <- naniar::replace_with_na_all(data = reg, condition = ~.x == 0)
 # #Graph data to inspect for outliers
 # boxplot(reg$fert_use_ha)
 # boxplot(reg$p_ha) #visual representation of data points and outliers. #values are generally within 0.137 tons P/ha maximum (from World Bank) ; 5698 values are NA
-# plot(reg$yield, reg$en_emiss_ha) #there are some values for which yields are 0 but fuel emissions per ha is above 0.010 Gg/ha, values that are higher than 0.015 Gg/ha are all from Singapore, everything else is lower than 0.010
+# plot(reg$yield, reg$en_emiss_ha) #there are some values for which yields are low but fuel emissions per ha is above 0.010 Gg/ha, values that are higher than 0.5 Gg/ha are nearly all from Singapore. Others that are above 0.15 include Bermuda, Hong Kong, and Kuwait.
 # boxplot(reg$en_emiss_ha) #429 outliers
 # plot(reg$yield, reg$m_energy_ha)  #outliers with values > 1 primarily Singapore, China Hong Kong, Kuwait
-# plot(reg$yield, reg$fert_emiss_ha) #some high values have nearly 0 yields,  2012 values are NA, values are lower in magnitude 
+# plot(reg$yield, reg$fert_emiss_ha) #some high values have low yields, but values are substantially more clustered (w/ less extreme outliers) than for fert_use_ha, p_ha, en_emiss_ha, and m_energy_ha. 2012 values are NA, values are lower in magnitude 
 # boxplot(reg$fert_emiss_ha)
 # ggplot(reg) + geom_density(aes(fert_emiss_ha))
 
 #remove countries with many substantial and unexplainable outlier values
 outlier_en_countries <- reg %>% filter(en_emiss_ha>=0.15) %>% distinct(country) %>% pull() 
 outlier_p_countries <- reg %>% filter(p_ha>=0.1) %>% distinct(country) %>% pull() 
-outlier_m_countries <- reg %>% filter(m_energy_ha>=1.) %>% distinct(country) %>% pull() 
+outlier_m_countries <- reg %>% filter(m_energy_ha>=1.0) %>% distinct(country) %>% pull() 
 reg <- reg %>% filter(!country %in% c(outlier_en_countries, outlier_p_countries, outlier_m_countries))
 
-write_csv(reg, "int_data/reg.csv")
+write_csv(reg, "int_data/reg_dat_outliers_removed.csv")
 ```
 
 ```{r Aggregate African countries data by region} 
@@ -143,16 +138,16 @@ Africa[which(!Africa %in% unique(reg$country))]
 #match all possible, based on manual examination of faostat countries.  non-matching ones aren't listed separately in faostat
 reg$country <- recode(reg$country, "Côte d'Ivoire"="Côte d’Ivoire")
 
-#create new coumn with names as factors to revise
+#create new column with names as factors to revise
 reg <- mutate(reg, Country_rename = country)
 
 # add region name for countries in african regions AND in list of africa countries included in FOFA. this ensures that later regressions are conducted such that the fixed effect for a region only includes countries that are in the region for which predictions are being made (i.e. FOFA projections for northern africa exclude libya)
- africa_scenario_countries <- read.csv(file = "int_data/countries_included_in_africa.csv")[,2]
- reg$Country_rename[reg$Country_rename %in% E_Afr & reg$country %in% africa_scenario_countries] <-  "E_Afr"
- reg$Country_rename[reg$Country_rename %in% W_Afr & reg$country %in% africa_scenario_countries] <-  "W_Afr"
- reg$Country_rename[reg$Country_rename %in% C_Afr & reg$country %in% africa_scenario_countries] <-  "C_Afr"
- reg$Country_rename[reg$Country_rename %in% S_Afr & reg$country %in% africa_scenario_countries] <-  "S_Afr"
- reg$Country_rename[reg$Country_rename %in% N_Afr & reg$country %in% africa_scenario_countries] <-  "N_Afr"
+africa_scenario_countries <- read.csv(file = "int_data/countries_included_in_africa.csv")[,2]
+reg$Country_rename[reg$Country_rename %in% E_Afr & reg$country %in% africa_scenario_countries] <-  "E_Afr"
+reg$Country_rename[reg$Country_rename %in% W_Afr & reg$country %in% africa_scenario_countries] <-  "W_Afr"
+reg$Country_rename[reg$Country_rename %in% C_Afr & reg$country %in% africa_scenario_countries] <-  "C_Afr"
+reg$Country_rename[reg$Country_rename %in% S_Afr & reg$country %in% africa_scenario_countries] <-  "S_Afr"
+reg$Country_rename[reg$Country_rename %in% N_Afr & reg$country %in% africa_scenario_countries] <-  "N_Afr"
 
 aggregate_reg <- function(region_data, region_name){
   output <- region_data %>% select(year,cropland, tot_kcal, en_emiss, fert_use, pest_use, fert_emiss, m_energy) %>% 
@@ -173,10 +168,11 @@ reg_S <- dplyr::filter(reg,reg$Country_rename == "S_Afr" )
 reg_N <- dplyr::filter(reg,reg$Country_rename == "N_Afr" )
 
 reg_E_aggregate <- aggregate_reg(reg_E, "East")
-reg_W_aggregate <- aggregate_reg(reg_E, "West")
-reg_S_aggregate <- aggregate_reg(reg_E, "South")
-reg_N_aggregate <- aggregate_reg(reg_E, "North")
-reg_C_aggregate <- aggregate_reg(reg_E, "Central")
+reg_W_aggregate <- aggregate_reg(reg_W, "West")
+reg_C_aggregate <- aggregate_reg(reg_C, "Central")
+reg_S_aggregate <- aggregate_reg(reg_S, "South")
+reg_N_aggregate <- aggregate_reg(reg_N, "North")
+
 ```
 
 ```{r Load in other countries' data and join it with African regions data}
