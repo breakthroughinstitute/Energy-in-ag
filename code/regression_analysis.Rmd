@@ -46,16 +46,6 @@ m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>%
 #units: Terajoules. #timeframe 1970-2020
 
 
-library(dplyr)
-library(tidyr)
-library(readr)
-
-m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>% 
-  select(Country = Area, Year, Item, Value) %>% 
-  pivot_wider(names_from = Item, values_from = Value) %>% 
-  mutate(m_energy = (`Gas-Diesel oil` - coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4)
-
-
 #fertilizer application emissions
 fert_emiss <- read_csv("raw_data/faostat/fert_use_emissions.csv") %>% select(Country = Area, Year, fert_emiss = Value)
 #units: kilotonnes (i.e. gigagram) CO2e, using AR5 GWP. timeframe: 1961-2020
