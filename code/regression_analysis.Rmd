@@ -62,8 +62,9 @@ prod <- read_csv("int_data/prod.cropland.csv")
 
 #scenarios for regression analysis
 scenarios <- read_csv("int_data/scenarios.csv") %>%  #yields are in kcal/ha
-  mutate(region = recode(region, E_Afr = "East", C_Afr = "Central", S_Afr = "South", N_Afr = "North", W_Afr = "West")) %>%   #Convert country names in scenarios to East, West, Central, South, North
-  dplyr::rename(country=region) #rename column to match with variable name used to fit regression
+  mutate(region = recode(region, E_Afr = "Eastern", C_Afr = "Middle", S_Afr = "Southern", N_Afr = "Northern", W_Afr = "Western")) %>%   #Convert country names in scenarios to East, West, Central, South, North
+  dplyr::rename(country=region) %>%  #rename column to match with variable name used to fit regression
+  mutate(scenario = factor(scenario, levels = c("b", "p", "h"), labels = c("Baseline", "Projected", "High")))
 ```
 
 ```{r Calculate total fuel emissions, calculate emissions per ha for each input }
@@ -166,11 +167,11 @@ reg_C <- dplyr::filter(reg,reg$Country_rename == "C_Afr" )
 reg_S <- dplyr::filter(reg,reg$Country_rename == "S_Afr" )
 reg_N <- dplyr::filter(reg,reg$Country_rename == "N_Afr" )
 
-reg_E_aggregate <- aggregate_reg(reg_E, "East")
-reg_W_aggregate <- aggregate_reg(reg_W, "West")
-reg_C_aggregate <- aggregate_reg(reg_C, "Central")
-reg_S_aggregate <- aggregate_reg(reg_S, "South")
-reg_N_aggregate <- aggregate_reg(reg_N, "North")
+reg_E_aggregate <- aggregate_reg(reg_E, "Eastern")
+reg_W_aggregate <- aggregate_reg(reg_W, "Western")
+reg_C_aggregate <- aggregate_reg(reg_C, "Middle")
+reg_S_aggregate <- aggregate_reg(reg_S, "Southern")
+reg_N_aggregate <- aggregate_reg(reg_N, "Northern")
 ```
 
 ```{r Load in other countries' data and join it with African regions data}
@@ -241,7 +242,7 @@ m_energy_ols <- lm(filter_reg, formula = log(m_energy_ha) ~ log(yield) + factor(
 
 ```{OLS regression with africa data aggregated at continent level}
 #fit regression models again with data for african countries and regions aggregated at the continent level. this lets us make continent-level predictions below with proper uncertainty levels
-africa_level_reg <- filter_reg %>% mutate(country = recode(country, "East"="Africa", "West"="Africa","Central"="Africa","South"="Africa","North"="Africa")) %>%
+africa_level_reg <- filter_reg %>% mutate(country = recode(country, "Eastern"="Africa", "Western"="Africa","Middle"="Africa","Southern"="Africa","Northern"="Africa")) %>%
                                             group_by(country, year) %>% 
                                             summarize(across(c(en_emiss, fert_emiss, pest_use, fert_use, m_energy, tot_kcal, cropland), sum, na.rm=T)) %>%
                                             mutate(yield = tot_kcal/cropland, 
@@ -349,14 +350,15 @@ names(region_totals)[names(region_totals) == "tot_emiss_ha"] <- "tot_emiss"
 
 #Add LUC
 ```{r Add LUC data to Energy emissions data}
-region_key <- c(C_Afr="Central", E_Afr="East", N_Afr = "North", S_Afr="South", W_Afr="West")
+region_key <- c(C_Afr="Middle", E_Afr="Eastern", N_Afr = "Northern", S_Afr="Southern", W_Afr="Western")
 
 convert_luc_co2 <- function(x){return(x * kg_to_mt/38)} # convert to million metric ton and divide by 38, the number of years between 2012 and 2050, this division annualizes the emissions
 
 luc_co2_region <- read_csv("int_data/luc_co2_region.csv") %>%  #read in kg CO2e from LUC by region and scenario, with low values calculated allowing for negative LUC for crops (i.e. restoration) and high values setting all negative LUC to 0.
   mutate(region = recode(region, !!!region_key)) %>%  #rename regions for joining
   rename(luc_co2_low = co2_low, luc_co2_high=co2_high) %>%  #clarify column names
-  mutate(across(c(luc_co2_low, luc_co2_high), convert_luc_co2)) #convert to MMT CO2/yr
+  mutate(across(c(luc_co2_low, luc_co2_high), convert_luc_co2), #convert to MMT CO2/yr
+         scenario = factor(scenario, levels = c("b", "p", "h"), labels = c("Baseline", "Projected", "High"))) #make scenario a factor to join below w/ other data
 
 #add rows to luc_co2_region that is the total across regions for each scenario and c_loss_ratio
 luc_co2_region <- luc_co2_region %>% 
@@ -374,16 +376,6 @@ write_csv(all_emiss,"results/all_emiss_region.csv")
 
 #Graph results
 ```{r Set BTI style guide for  graphing}
-#set fonts 
-load_font <- function() {
-  text_font <<-  "Manuale"
-  title_font <<- "Futura"
-  print("Note: Download Futura.ttc and Manuale-Regular.ttf fonts first. Default location should be Library/Fonts/ folder. Url: https://www.dropbox.com/work/Style%20Guide/BTI%20Letterhead/Letterhead%20Font")
-  sysfonts::font_add(family="Futura", regular = "~/Library/Fonts/Futura.ttc")  #~/../../System/Library/Fonts/Supplemental/Futura.ttc")   #ttf: futura-regular.ttf
-  sysfonts::font_add(family="Manuale", regular = "~/Library/Fonts/manuale-regular.ttf")
-  showtext_auto()
-}
-
 #define colors
 bti_colors <- c("#0d4459", "#00a990", "#d05527", "#a33332",
                 "#b381d0",  "#dfb9a6", "#b2b2b1", "#2A2A2A", "#ecc627")
@@ -425,22 +417,12 @@ luc_scenario_included <- "luc_co2_high"
 fig_dat <- all_emiss %>% 
   filter(c_loss_ratio == c_loss_selected) %>%
   select(-c_loss_ratio, -paste0("luc_co2_", luc_scenario_excluded), -tot_co2_high, -tot_co2_low) %>% 
-  mutate(scenario = recode(scenario, "b" = "Baseline", "p" = "Projected", "h" = "High"),#Spell out scenarios for graphing 
-         scenario = factor(scenario, levels = c("Baseline", "Projected", "High"))) %>%  #change order of scenario column
+  mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High"))) %>%  #change order of scenario column
   pivot_longer(cols = c(en_emiss:starts_with("luc_co2")),names_to = "source", values_to = "emiss") %>% #restructure so there is a column for the lwr and upr input emission totals
   pivot_wider(names_from = estimate, values_from = emiss) %>%  #restructure so there is a column for the lwr and upr input emission totalsest)
   mutate(lwr = case_when(source == luc_scenario_included ~ NA_real_, TRUE ~ lwr), #set lwr and upr to NA when source equals "luc_co2_low" or "luc_co2_high" so that error bars are not plotted for LUC emissions
           upr = case_when(source == luc_scenario_included ~ NA_real_, TRUE ~ upr))
 ```
-
-```{r Fig . Emissions by Input Type by Region by Scenario}
-#column chart with error bars showing each type of emissions (energy, fertilizer, pesticide, machinery, luc), by scenario and region
-ggplot(fig_dat) +
-  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, fill=source), width = 0.2, position = position_dodge(.9)) +
-  facet_wrap(vars(region), scales = "free_y")
-```
-
 
 ```{r Fig 1. Total Africa LUC and Input Emissions by Scenario}
 #column chart showing total LUC emissions and total input emissions (sum of energy, fertilizer, pesticide, machinery), by scenario
@@ -448,7 +430,7 @@ fig1 <- fig_dat %>%
   filter(source %in% c(luc_scenario_included, "tot_emiss"), region=="Africa") %>% 
   ggplot()+
   geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, fill=source), width = 0.2, position = position_dodge(.9))+
+  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
   ggtitle("Emissions from input use and LUC by scenario for Africa.") + 
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
@@ -459,7 +441,7 @@ fig1 <- fig_dat %>%
                     labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("tot_emiss", luc_scenario_included))) #set labels
 
 fig1
-ggsave(plot = fig1, filename = "results/Graphs/manuscript/fig1.png", width = 6, height = 4, units = "in", dpi = 300)
+ggsave(plot = fig1, filename = "results/graphs/manuscript/fig1.png", width = 6, height = 4, units = "in", dpi = 300)
 ```
 
 ```{r Fig 2. Africa Input Emissions by Scenario and Source}
@@ -468,7 +450,7 @@ fig2 <- fig_dat %>%
   filter(!source %in% c(luc_scenario_included, "tot_emiss"), region=="Africa") %>% #filter just to individual inputs
   ggplot()+
   geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, fill=source), width = 0.2, position = position_dodge(.9))+
+  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
   ggtitle("Emissions from input use by scenario for Africa.") + 
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
@@ -479,7 +461,7 @@ fig2 <- fig_dat %>%
                     labels = c("On-Farm Energy", "Synthetic N Application", "Synthetic N Manufacturing", "Pesticide Manufacturing", "Machinery Manufacturing")) #set labels
 
 fig2
-ggsave(plot = fig2, filename = "results/Graphs/manuscript/fig2.png", width = 6, height = 4, units = "in", dpi = 300)
+ggsave(plot = fig2, filename = "results/graphs/manuscript/fig2.png", width = 6, height = 4, units = "in", dpi = 300)
 ```
 
 ```{r Fig S1. Total LUC and Input Emissions by Scenario for each region}
@@ -498,13 +480,78 @@ figS1 <- fig_dat %>%
   scale_fill_manual(values = setNames(c(bti_colors[1], bti_colors[2]), c("tot_emiss", luc_scenario_included)), #set colors
                      labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("tot_emiss", luc_scenario_included)))+ #set labels
   theme_bti() + 
-  geom_hline(yintercept = 0, color = "black", linewidth = 0.5) #add x axis line since doesnt show up for all when facetted
+  geom_hline(yintercept = 0, color = "black", linewidth = 1) #add x axis line since doesnt show up for all when facetted
 
 figS1
-ggsave(plot = figS1, filename = "results/Graphs/supplementary/figs1.png", width = 6, height = 4, units = "in", dpi = 300)
+ggsave(plot = figS1, filename = "results/graphs/supplementary/figs1.png", width = 6, height = 4, units = "in", dpi = 300)
+```
+
+```{r Fig S2. Input Emissions by Scenario and Source for each region}
+#column chart showing each source of input emissions for each region, by scenario
+figS2 <- fig_dat %>% 
+  filter(!source %in% c(luc_scenario_included, "tot_emiss"), region!="Africa") %>% 
+  ggplot()+
+  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
+  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
+  ggtitle("Emissions from input use by scenario for each region.") + 
+  xlab("Scenarios") + 
+  ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
+  facet_wrap(~region, scales = "free_y", ncol=3)+
+  labs(fill = "Emission Source")+  #caption = "95% confidence interval shown."
+  scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))+ #move y origin to plot margin/line
+  scale_fill_manual(values=bti_colors, #set colors to bti colors
+                    labels = c("On-Farm Energy", "Synthetic N Application", "Synthetic N Manufacturing", "Pesticide Manufacturing", "Machinery Manufacturing"))+ #set labels
+  theme_bti() + 
+  geom_hline(yintercept = 0, color = "black", linewidth = 1) #add x axis line since doesnt show up for all when facetted
+
+figS2
+ggsave(plot = figS2, filename = "results/graphs/supplementary/figs2.png", width = 6, height = 4, units = "in", dpi = 300)
+```
+
+```{r Fig S3. Rebound Analysis Line Graph}
+
+```
+
+#Create and Export Tables
+```{r Table 1. Africa Yield and Harvested Area and Arable Area by Scenario}
+scenarios %>% filter(country=="Africa") %>% 
+  mutate(yield = round(yield/1000000, digits = 2), #convert to million kcal/ha
+         harv_area = round(harv_area/1000000, digits = 2), #convert to million ha
+         arable_area = round(arable_area/1000000, digits = 2)) %>% #convert to million ha
+  select("Scenario"=scenario, "Yield (million kcal/ha)" = yield, 
+         "Harvested Area (million ha)" = harv_area, "Arable Area (million ha)" = arable_area) %>% 
+  arrange(Scenario) %>%  #order by scenario order
+  write_csv("results/tables/table1_afr_yield_area_by_scenario.csv")
+```
+
+```{r Table S1. Yield, Harvested Values for each Scenario and Region}
+scenarios %>% 
+  mutate(scenario = recode(scenario, "b"="Baseline","p"="Projected", "h"="High"), #rename scenarios for presentation
+         country = recode(country, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa"), #change to full names for regions
+         yield = round(yield/1000000, digits = 2), #convert to million kcal/ha
+         harv_area = round(harv_area/1000000, digits = 2), #convert to million ha
+         arable_area = round(arable_area/1000000, digits = 2)) %>% #convert to million ha
+  select("Region"=country, "Scenario"=scenario, "Yield (million kcal/ha)" = yield, 
+         "Harvested Area (million ha)" = harv_area, "Arable Area (million ha)" = arable_area) %>%
+  arrange(Scenario, Region) %>% #arder by scenario order, and regions alphabetically within
+  write_csv("results/tables/tableS1_yield_area_by_scenario_and_region.csv")
+```
+
+```{r Table S2. }
+read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for crops for all countries; need to filter to just countries included
+  select(crop = id, country = ADMIN, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
+  mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
+  filter(country %in% africa_scenario_countries) %>% #filter to just countries included
+         #filter to c_loss_ratio used
+  select(crop, country, co2_ha) %>% #select just crops, country, and kg Co2/ha
+  mutate(co2_ha = co2_ha / 1000) %>%  #convert to metric tons Co2/ha
+  pivot_wider(names_from = crop, values_from = co2_ha) %>% #pivot to have 1 column per crop
+  write_csv("results/tables/tableS2_tons_co2_ha_by_crop_and_country.csv")
 ```
 
 
+
+#Old Graph and table code
 ```{r Plot GHG data across Africa's regions and for SSA as a whole}
 GHG <- all_emiss #unsure if GHG is meant to be this dataframe. no notes in old script on this or what GHG dataframe is. 
 GHG_Afr <- GHG[GHG$Region == "Africa",] #have separate charts for SSA data to compare to region breakdown
@@ -527,7 +574,7 @@ GHG_region <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) +
       # plot.background = element_rect(fill=NA), legend.key=element_rect(fill=NA)
 GHG_region <- GHG_region  +  scale_fill_manual(values=wes_palette(n=5, name="Darjeeling1")) 
 GHG_region
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/GHG_region.png", GHG_region) #save ggplot, not great with dimensions, might use current plot window as default plot size and so may need to specify width and height, dims: Saving 7.29 x 4.51 in image
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region.png", GHG_region) #save ggplot, not great with dimensions, might use current plot window as default plot size and so may need to specify width and height, dims: Saving 7.29 x 4.51 in image
 
 
 #bar chart by region, grouped
@@ -536,7 +583,7 @@ GHG_region_grouped <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) +
     geom_bar(position="dodge", stat="identity") + ggtitle(expression(paste("Greenhouse emissions by scenario and region in Africa"))) + xlab("Scenarios") + ylab("GHG Emissions (Gigagtons CO2eq)") + labs(fill = "Regions")  + scale_x_discrete(labels= x.axis) +  theme_bti()
 
 GHG_region_grouped <- GHG_region_grouped  +  scale_fill_manual(values=bti_colors) 
-ggsave(filename =  "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/GHG_region_grouped.png", plot = GHG_region_grouped )
+ggsave(filename =  "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region_grouped.png", plot = GHG_region_grouped )
 GHG_region_grouped
 
 #Stacked
@@ -547,7 +594,7 @@ GHG_region_stacked <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) +
        plot.title = element_text(size=15, face="bold")) 
       # plot.background = element_rect(fill=NA), legend.key=element_rect(fill=NA)
 GHG_region_stacked <- GHG_region  +  scale_fill_manual(values=bti_colors) 
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/GHG_region_stacked.png", plot = GHG_region_stacked, width = , height = )
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region_stacked.png", plot = GHG_region_stacked, width = , height = )
 
 # Africa
 #GHG_Afr_high <- GHG_SSA[GHG_Afr$Scenario == "High",] #Use High_alt as High
@@ -559,7 +606,7 @@ GHG_Afr_plot <- ggplot(GHG_Afr, aes(y = GHG, x= Scenario)) +
        panel.grid.major.y = element_line(colour="grey68",linetype="solid"),
        panel.grid.major.x = element_line(colour="grey68",linetype="solid"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
        plot.title = element_text(size=15, face="bold"))
- ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/GHG_Afr.png", plot = GHG_Afr_plot )   
+ ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_Afr.png", plot = GHG_Afr_plot )   
 ```
 
 ```{r Energy emissions by region }
@@ -816,7 +863,7 @@ Energy_E <- ggplot(Energy_emis_E, aes(fill = `Energy Source` , y = Value, x = Sc
     geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("East"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2 eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin = lwr, ymax= upr), width=.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
 Energy_E <- Energy_E  +  scale_fill_manual(values=bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_E.png", plot = Energy_E)  
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_E.png", plot = Energy_E)  
 
 #West Africa
 Energy_emis_W$Scenario <- factor(Energy_emis_W$Scenario ,levels = c("Baseline", "Projected", "High"))
@@ -825,7 +872,7 @@ Energy_W <- ggplot(Energy_emis_W, aes(fill = `Energy Source` , y = Value, x = Sc
     geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("West"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=0.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))  + theme_bti()
 Energy_W <- Energy_W  +  scale_fill_manual(values=bti_colors)
-ggsave(filename ="~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_W.png", plot = Energy_W)  
+ggsave(filename ="~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_W.png", plot = Energy_W)  
 
 #Central Africa
 Energy_emis_C$Scenario <- factor(Energy_emis_C$Scenario ,levels = c("Baseline", "Projected", "High"))
@@ -834,7 +881,7 @@ Energy_C <- ggplot(Energy_emis_C, aes(fill = `Energy Source` , y = Value, x = Sc
     geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Central"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
 Energy_C <- Energy_C  +  scale_fill_manual(values=bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_C.png", plot = Energy_C )  
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_C.png", plot = Energy_C )  
 
 #Southern Africa
 Energy_emis_S$Scenario <- factor(Energy_emis_S$Scenario ,levels = c("Baseline", "Projected", "High"))
@@ -843,7 +890,7 @@ Energy_S <- ggplot(Energy_emis_S, aes(fill = `Energy Source` , y = Value, x = Sc
     geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Southern"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
 Energy_S <- Energy_S  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_S.png", plot = Energy_S, width = , height = )  
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_S.png", plot = Energy_S, width = , height = )  
 
 
 #North Africa
@@ -852,7 +899,7 @@ Energy_emis_N$Scenario <- factor(Energy_emis_N$Scenario ,levels = c("Baseline", 
 Energy_N <- ggplot(Energy_emis_N, aes(fill = `Energy Source` , y = Value, x = Scenario))  +  geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("North")))  + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +  scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
 Energy_N <- Energy_N  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_N.png", plot = Energy_N)  
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_N.png", plot = Energy_N)  
 
 #Africa
 Energy_emis_Afr$Scenario <- factor(Energy_emis_Afr$Scenario ,levels = c("Baseline", "Projected", "High"))
@@ -860,7 +907,7 @@ Energy_emis_Afr$Scenario <- factor(Energy_emis_Afr$Scenario ,levels = c("Baselin
 Energy_Afr <- ggplot(Energy_emis_Afr, aes(fill = `Energy Source` , y = Value, x = Scenario))  +  geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Africa")))  + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
                  position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
 Energy_Afr <- Energy_Afr  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_N.png", plot = Energy_Afr) 
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_N.png", plot = Energy_Afr) 
 
 
 #total Energy graphs with all regions included except SSA (no error bars)
@@ -872,7 +919,7 @@ Energy_emis_all$Scenario <- factor(Energy_emis_all$Scenario ,levels = c("Baselin
 Energy_emis_all_reg <- ggplot(Energy_emis_all, aes(fill = Region , y = `sum(Value)`, x = Scenario)) + 
     geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Energy Input Use Emissions by Region"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Region") + theme_bti()
 Energy_emis_all_reg <- Energy_emis_all_reg +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/Energy_all_reg.png", plot = Energy_emis_all_reg, width = , height = )
+ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_all_reg.png", plot = Energy_emis_all_reg, width = , height = )
 
 #Create a figure that has all of the energy source by region grafs displayed
 Energy_N <- Energy_N + ggtitle("") + ylab("") + xlab("") +  theme_bti() 
@@ -892,7 +939,7 @@ energy_region_grafs <- annotate_figure(energy_region_grafs,
                 left = text_grob("GHG Emissions (Mt CO2eq)", color = "black", rot = 90))
                 
                 #fig.lab = "Figure 1", fig.lab.face = "bold")
-ggsave(filename = "results/Graphs/supplementary/s2_all_input_emiss_by_region.png", plot = energy_region_grafs, width = , height = )
+ggsave(filename = "results/graphs/supplementary/s2_all_input_emiss_by_region.png", plot = energy_region_grafs, width = , height = )
 
 
 #Total Energy emissions error bars, and with LUC emis for each region 
@@ -1060,7 +1107,7 @@ energy_LUC_grafs2 <- annotate_figure(energy_LUC_grafs2,
                 left = text_grob("GHG Emissions (Mt CO2eq)", color = "black", rot = 90))
                 
                 #fig.lab = "Figure 1", fig.lab.face = "bold")
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/energy_LUC_grafs.png", plot = energy_LUC_grafs2, width = , height = )
+ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/energy_LUC_grafs.png", plot = energy_LUC_grafs2, width = , height = )
 
 write.csv(Energy_emis_C, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_C.csv")
 write.csv(Energy_emis_E, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_E.csv")
@@ -1095,7 +1142,7 @@ LUC_stacked <- ggplot(LUC_Afr_regions , aes(fill = Region , y = `LUC emissions(G
        plot.title = element_text(size=13, face="bold"))
 
 LUC_stacked <- LUC_stacked +  scale_fill_manual(values=wes_palette(n=5, name="Darjeeling1"))
-ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Graphs/New Graphs/LUC_stacked_reg", plot = LUC_stacked , width = , height = )
+ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/LUC_stacked_reg", plot = LUC_stacked , width = , height = )
 
 
 #LUC_SSA chart
