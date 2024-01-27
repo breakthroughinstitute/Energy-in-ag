@@ -597,8 +597,16 @@ reg_fe_results %>%
 ```
 
 ```{r Table S6. Pesticide Application Rate per scenario and region}
-#tons pesticide per hectare
-
+reg_fe_results %>% 
+  mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
+  filter(dep_var=="p_ha", region!="Africa") %>% #filter to just pesticide fertilizer application rate, and exclude Africa total
+  select(-lwr, -upr) %>% #remove upper and lower bounds
+  pivot_wider(names_from = dep_var, values_from = fit) %>% #pivot to have 1 column per source
+  mutate(p_ha=p_ha*1000) %>%  #convert tons/ha to kg/ha
+  rename(Scenario = scenario, Region = region, `Pesticide Application (kg/ha)` = p_ha) %>%  #rename columns for presentation
+  arrange(Region, Scenario) %>% #order by scenario order, and regions alphabetically within
+  write_csv("results/tables/tableS6_pesticide_application_rate_by_scenario_and_region.csv")
+#output is in kg pesticide per hectare
 ```
 
 
