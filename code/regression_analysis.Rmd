@@ -609,6 +609,34 @@ reg_fe_results %>%
 #output is in kg pesticide per hectare
 ```
 
+```{r Table S7. Region and AFrica Model slopes and intercepts}
+#generate table with the slope coefficient and intercept from each of the region-based regression models
+tibble(
+  `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
+  `Slope (b1)` = c(fert_emiss_ols$coefficients[2], fert_m_emiss_ols$coefficients[2], pest_emiss_ols$coefficients[2], en_emiss_ols$coefficients[2], m_emiss_ols$coefficients[2]),
+  `Intercept (b0)` = c(fert_emiss_ols$coefficients[1], fert_m_emiss_ols$coefficients[1], pest_emiss_ols$coefficients[1], en_emiss_ols$coefficients[1], m_emiss_ols$coefficients[1])) %>%
+  write_csv("results/tables/tableS7a_region_model_slopes_and_intercepts.csv")
+
+#generate table with the slope coefficient and intercept from the regression models with AFrica data aggregated
+tibble(
+  `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
+  `Slope (b1)` = c(afr_fert_emiss_ols$coefficients[2], afr_fert_m_emiss_ols$coefficients[2], afr_pest_emiss_ols$coefficients[2], afr_en_emiss_ols$coefficients[2], afr_m_emiss_ols$coefficients[2]),
+  `Intercept (b0)` = c(afr_fert_emiss_ols$coefficients[1], afr_fert_m_emiss_ols$coefficients[1], afr_pest_emiss_ols$coefficients[1], afr_en_emiss_ols$coefficients[1], afr_m_emiss_ols$coefficients[1])) %>%
+  write_csv("results/tables/tableS7b_africa_model_slopes_and_intercepts.csv")
+```
+
+```{r Table S8. Fixed effects for each African Region in the regression models}
+#generate table with the fixed effects for each region in the regression models
+tibble(
+  `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
+  `Middle Africa` = c(fert_emiss_ols$coefficients["factor(country)Middle"], fert_m_emiss_ols$coefficients["factor(country)Middle"], pest_emiss_ols$coefficients["factor(country)Middle"], en_emiss_ols$coefficients["factor(country)Middle"], m_emiss_ols$coefficients["factor(country)Middle"]),
+  `Eastern Africa` = c(fert_emiss_ols$coefficients["factor(country)Eastern"], fert_m_emiss_ols$coefficients["factor(country)Eastern"], pest_emiss_ols$coefficients["factor(country)Eastern"], en_emiss_ols$coefficients["factor(country)Eastern"], m_emiss_ols$coefficients["factor(country)Eastern"]),
+  `Northern Africa` = c(fert_emiss_ols$coefficients["factor(country)Northern"], fert_m_emiss_ols$coefficients["factor(country)Northern"], pest_emiss_ols$coefficients["factor(country)Northern"], en_emiss_ols$coefficients["factor(country)Northern"], m_emiss_ols$coefficients["factor(country)Northern"]),
+  `Southern Africa` = c(fert_emiss_ols$coefficients["factor(country)Southern"], fert_m_emiss_ols$coefficients["factor(country)Southern"], pest_emiss_ols$coefficients["factor(country)Southern"], en_emiss_ols$coefficients["factor(country)Southern"], m_emiss_ols$coefficients["factor(country)Southern"]),
+  `Western Africa` = c(fert_emiss_ols$coefficients["factor(country)Western"], fert_m_emiss_ols$coefficients["factor(country)Western"], pest_emiss_ols$coefficients["factor(country)Western"], en_emiss_ols$coefficients["factor(country)Western"], m_emiss_ols$coefficients["factor(country)Western"])) %>%
+  write_csv("results/tables/tableS8_region_model_fixed_effects.csv")
+```
+
 
 #Old Graph and table code
 ```{r Plot GHG data across Africa's regions and for SSA as a whole}
