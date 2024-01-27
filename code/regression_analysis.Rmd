@@ -251,15 +251,23 @@ africa_level_reg <- filter_reg %>% mutate(country = recode(country, "Eastern"="A
                                                    fert_m_emiss_ha = fert_use * fert_ef * kg_to_mt/cropland, 
                                                    m_emiss_ha = m_energy * tpes_ef * tons_to_mt/cropland,
                                                    pest_emiss_ha = pest_use * pest_ef * tons_to_mt /cropland,
-                                                   tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha)
+                                                   tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha,
+                                                   p_ha = pest_use/cropland, #calculate africa-wide input use per hectare
+                                                   fert_use_ha = fert_use/cropland)
 
 africa_level_reg <- naniar::replace_with_na_all(data = africa_level_reg, condition = ~.x == 0) #replace 0s with NA 
+
+#models for emissions per ha
 afr_en_emiss_ols <- lm(africa_level_reg, formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Energy Emissions OLS Regression
 afr_fert_emiss_ols <- lm(africa_level_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N emissions OLS Regression
 afr_fert_m_emiss_ols <- lm(africa_level_reg, formula = log(fert_m_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N manufacturing emissions OLS Regression
 afr_m_emiss_ols <- lm(africa_level_reg, formula = log(m_emiss_ha) ~ log(yield) + factor(country)) #Energy embodied in machinery OLS Regression
 afr_pest_emiss_ols <- lm(africa_level_reg, formula = log(pest_emiss_ha) ~ log(yield) + factor(country)) #Pesticides manufacturing emissions OLS Regression
 afr_tot_emiss_ols <- lm(africa_level_reg, formula = log(tot_emiss_ha) ~ log(yield) + factor(country)) #Total emissions OLS Regression
+
+#models for input use per ha
+afr_p_ols <- lm(africa_level_reg, formula = log(p_ha) ~ log(yield) + factor(country)) #Pesticides Use OLS regression
+afr_fert_use_ols <- lm(africa_level_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))#Synthetic N use or application OLS regression
 ```
 
 ```{r Sanity Check on parameters - optional for running}
@@ -278,9 +286,9 @@ afr_tot_emiss_ols <- lm(africa_level_reg, formula = log(tot_emiss_ha) ~ log(yiel
 # abline(b=1, a=0) #values fall around this 1:1 line
 ```
 #Generate predictions
-```{r Calculate predicted input use per ha by input, scenario and region}
+```{r Calculate predicted input emissions and use per ha by input, scenario and region}
 #create empty dataframe to add in fixed effect regression results
-reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double(), se_log = double(), df =integer(), residual_scale = double())
+reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
 
 i=1
 #define regions to loop through
@@ -288,8 +296,8 @@ regions <- unique(scenarios$country)
 regions <- regions[!regions =="Africa"]
 
 #map variables to model names
-var_models = tibble(var = c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha"),
-                   model = c("en_emiss_ols", "fert_emiss_ols", "fert_m_emiss_ols", "m_emiss_ols", "pest_emiss_ols", "tot_emiss_ols"))
+var_models = tibble(var = c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha", "p_ha", "fert_use_ha"),
+                   model = c("en_emiss_ols", "fert_emiss_ols", "fert_m_emiss_ols", "m_emiss_ols", "pest_emiss_ols", "tot_emiss_ols", "p_ols", "fert_use_ols"))
 
 #loop through each dependent variable, scenario, and region to predict each dep variable for each region & scenario
 for (dependent_variable in var_models$var) {
@@ -301,7 +309,7 @@ for (dependent_variable in var_models$var) {
                             region, 
                             as.list(as_vector(predict(get(var_models$model[var_models$var==dependent_variable]), #choose regression model to predict with
               newdata = scenarios[scenarios$country==region & scenarios$scenario==scenario, c("country", "yield")], #add regression estimates
-              se.fit = T, interval = "confidence", level = 0.95))))
+              interval = "confidence", level = 0.95))))
       i=i+1
     }
   }
@@ -316,27 +324,27 @@ for (dependent_variable in var_models$var) {
                             as.list(as_vector(predict(
                               get(paste0("afr_",var_models$model[var_models$var==dependent_variable])), #choose regression model 
                               newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
-                              se.fit = T, interval = "confidence", level = 0.95
+                              interval = "confidence", level = 0.95
                               ))))
     i=i+1
   }
 }
 
 #exponentiate estimates and confidence intervals (not SE)
-reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr = exp(upr)) %>% 
-  select(-df, -residual_scale)
+reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr = exp(upr)) 
+  
+#convert scenario in reg_fe_results to factor variable
+reg_fe_results <- reg_fe_results %>% mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High")))
 ```
 
 ```{r Calculate total predicted emissions for each input source, region, and scenario}
-reg_fe_results <- reg_fe_results %>% 
-  pivot_longer(c(fit, lwr, upr, se_log), names_to = "estimate") %>% #make dataframe long
-  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
-  mutate(total_emiss = value * arable_area) #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
-
 #create dataframe with only totals for each emissions type and for all input emissions, by region and scenario
 region_totals <- reg_fe_results %>% 
-  select(dep_var, scenario, region, estimate,total_emiss) %>% #select variables of interest
-  filter(!estimate == "se_log") %>% #filter to exclude logged standard errors
+  filter(dep_var %in% c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha")) %>% #filter to only emissions variables
+  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
+  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
+  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
+  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
   pivot_wider(names_from = dep_var, values_from = total_emiss)  #make dataframe wide
 
 #rename each emissions type to note that it is total emissions, not emissions per hectare
@@ -349,7 +357,7 @@ names(region_totals)[names(region_totals) == "tot_emiss_ha"] <- "tot_emiss"
 ```
 
 #Add LUC
-```{r Add LUC data to Energy emissions data}
+```{r Add LUC data to input emissions data}
 region_key <- c(C_Afr="Middle", E_Afr="Eastern", N_Afr = "Northern", S_Afr="Southern", W_Afr="Western")
 
 convert_luc_co2 <- function(x){return(x * kg_to_mt/38)} # convert to million metric ton and divide by 38, the number of years between 2012 and 2050, this division annualizes the emissions
@@ -537,7 +545,7 @@ scenarios %>%
   write_csv("results/tables/tableS1_yield_area_by_scenario_and_region.csv")
 ```
 
-```{r Table S2. }
+```{r Table S2. CO2 per ha per crop and country}
 read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for crops for all countries; need to filter to just countries included
   select(crop = id, country = ADMIN, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
   mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
@@ -549,6 +557,49 @@ read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for c
   write_csv("results/tables/tableS2_tons_co2_ha_by_crop_and_country.csv")
 ```
 
+```{r Table S3 African countries and regional classifications}
+#remove Mauritius from scenario country list since not in LUC CO2 data 
+africa_scenario_countries <- africa_scenario_countries[africa_scenario_countries!="Mauritius"]
+
+#list unique countries in each region
+tibble(
+  Region = c("Middle Africa", "Eastern Africa", "Northern Africa", "Southern Africa", "Western Africa"),
+  Countries = c(paste(C_Afr[C_Afr %in% africa_scenario_countries], collapse = ", "), 
+                paste(E_Afr[E_Afr %in% africa_scenario_countries], collapse = ", "), 
+                paste(N_Afr[N_Afr %in% africa_scenario_countries], collapse = ", "), 
+                paste(S_Afr[S_Afr %in% africa_scenario_countries], collapse = ", "), 
+                paste(W_Afr[W_Afr %in% africa_scenario_countries], collapse = ", ")
+                )) %>% 
+  write_csv("results/tables/tableS3_african_countries_and_regions.csv")
+```
+
+```{r Table S4. LUC and total input emissions by scenario and region}
+fig_dat %>% 
+  mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
+  filter(source %in% c(luc_scenario_included, "tot_emiss")) %>% #filter to just LUC and total input emissions
+  select(-lwr, -upr) %>% #remove upper and lower bounds
+  pivot_wider(names_from = source, values_from = fit) %>% #pivot to have 1 column per source
+  rename(Scenario = scenario, Region = region, LUC = luc_scenario_included, `Input Use` = tot_emiss) %>%  #rename columns for presentation
+  arrange(Scenario, Region) %>%   #arder by scenario order, and regions alphabetically within
+  write_csv("results/tables/tableS4_LUC_and_total_input_emissions_by_scenario_and_region.csv")
+```
+
+```{r Table S5. Synthetic Nitrogen Fertilizer Application Rate per scenario and region}
+reg_fe_results %>% 
+  mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
+  filter(dep_var=="fert_use_ha", region!="Africa") %>% #filter to just synthetic nitrogen fertilizer application rate, and exclude Africa total
+  select(-lwr, -upr) %>% #remove upper and lower bounds
+  pivot_wider(names_from = dep_var, values_from = fit) %>% #pivot to have 1 column per source
+  rename(Scenario = scenario, Region = region, `Synthetic Fertilizer Application (kg N/ha)` = fert_use_ha) %>%  #rename columns for presentation
+  arrange(Region, Scenario) %>% #order by scenario order, and regions alphabetically within
+  write_csv("results/tables/tableS5_synthetic_nitrogen_fertilizer_application_rate_by_scenario_and_region.csv")
+#kg N synthetic fertilizer per ha
+```
+
+```{r Table S6. Pesticide Application Rate per scenario and region}
+#tons pesticide per hectare
+
+```
 
 
 #Old Graph and table code
