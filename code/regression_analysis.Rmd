@@ -418,9 +418,30 @@ theme_bti <- function (base_size = 14, base_family = "Helvetica") {
 ```
 
 ```{r Set up data for graphing}
-c_loss_selected <- "H" #edit to change which soil carbon loss scenario is used for following graphs
+c_loss_selected <- "H" #edit to change which soil carbon loss scenario is used for following graphs. options are L, H
 luc_scenario_excluded <- "low" #edit to change which LUC scenario is used for following graphs. options are low and high
-luc_scenario_included <- "luc_co2_high"
+luc_scenario_included <- "luc_co2_high" #as above options are luc_co2_low and luc_co2_high
+
+#map short crop names (e.g. banp, barl) onto full names (e.g. Bananas and Plantains, Barley)
+crop_full_names <-c(
+  "banp" = "Bananas and Plantains",
+  "barl" = "Barley",
+  "bean" = "Beans, dry",
+  "cass" = "Cassava",
+  "cott" = "Cotton",
+  "grou" = "Groundnuts",
+  "maiz" = "Maize",
+  "mill" = "Millet",
+  "ooil" = "Oilcrops",
+  "opul" = "Pulses",
+  "pota" = "Potatoes",
+  "rice" = "Rice, paddy",
+  "sorg" = "Sorghum",
+  "soyb" = "Soybeans",
+  "sugb" = "Sugar beet",
+  "sugc" = "Sugar cane",
+  "swpy" = "Sweet potatoes and yams",
+  "whea" = "Wheat")
 
 fig_dat <- all_emiss %>% 
   filter(c_loss_ratio == c_loss_selected) %>%
@@ -637,7 +658,20 @@ tibble(
   write_csv("results/tables/tableS8_region_model_fixed_effects.csv")
 ```
 
-
+```{r Table S9. LUC (ha) by crop}
+#generate table with the LUC (ha) by crop
+read_csv("int_data/luc_co2_country_crop.csv") %>%  #read in kg co2/ha carbon loss for crops for all countries; need to filter to just countries included
+  select(Crop = Item, CountryName, scenario, luc, c_loss_ratio) %>%  
+  mutate(CountryName = recode(CountryName, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
+  filter(CountryName %in% africa_scenario_countries,  #filter to just countries included
+         c_loss_ratio == c_loss_selected) %>% #filter to c_loss_ratio used
+  group_by(Crop, scenario) %>% summarize(sum_luc = sum(luc)) %>% #summarize to get total LUC for each crop)
+  mutate(sum_luc = sum_luc/1000000) %>% #convert to million ha
+  pivot_wider(names_from = scenario, values_from = sum_luc) %>% #pivot to wide format
+  mutate(Crop = recode(Crop, !!!crop_full_names)) %>% #replace crop names w/full names
+  select(Crop, "Baseline"=b, "Projected"=p, "High"=h) %>% #rename cols for presentation and change order of scenarios
+  write_csv("results/tables/tableS9_LUC_by_crop.csv")
+```
 #Old Graph and table code
 ```{r Plot GHG data across Africa's regions and for SSA as a whole}
 GHG <- all_emiss #unsure if GHG is meant to be this dataframe. no notes in old script on this or what GHG dataframe is. 
