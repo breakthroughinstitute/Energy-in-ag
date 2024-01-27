@@ -85,7 +85,7 @@ kcal_excluded_from_fofa <- anti_join(kcal, d, by = c("crop" = "Item")) %>%
 #indicates that nuts, green maize, and mushrooms are omitted
 
 write.csv(fofa_excluded_from_kcal, "results/Supplementary/fofa_excluded_from_kcal.csv")
-write.csv(kcal_excluded_from_fofa, "results/Supplementary//fofa_excluded_from_kcal.csv")
+write.csv(kcal_excluded_from_fofa, "results/Supplementary/kcal_excluded_from_fofa.csv")
 
     
 d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal conversions
