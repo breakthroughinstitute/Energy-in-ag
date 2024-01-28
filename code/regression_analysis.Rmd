@@ -417,7 +417,7 @@ theme_bti <- function (base_size = 14, base_family = "Helvetica") {
 }
 ```
 
-```{r Set up data for graphing}
+```{r Set up data for graphing and tables}
 c_loss_selected <- "H" #edit to change which soil carbon loss scenario is used for following graphs. options are L, H
 luc_scenario_excluded <- "low" #edit to change which LUC scenario is used for following graphs. options are low and high
 luc_scenario_included <- "luc_co2_high" #as above options are luc_co2_low and luc_co2_high
@@ -566,14 +566,15 @@ scenarios %>%
   write_csv("results/tables/tableS1_yield_area_by_scenario_and_region.csv")
 ```
 
-```{r Table S2. CO2 per ha per crop and country}
+```{r Table S2. tons CO2 per ha per crop and country}
 read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for crops for all countries; need to filter to just countries included
   select(crop = id, country = ADMIN, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
   mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
-  filter(country %in% africa_scenario_countries) %>% #filter to just countries included
-         #filter to c_loss_ratio used
+  filter(country %in% africa_scenario_countries, #filter to just countries included
+         !crop %in% c("bean", "coff")) %>%  #remove bean & coffee since not matched w/ FOFA and fao data and so not used in analysis
   select(crop, country, co2_ha) %>% #select just crops, country, and kg Co2/ha
-  mutate(co2_ha = co2_ha / 1000) %>%  #convert to metric tons Co2/ha
+  mutate(co2_ha = co2_ha / 1000,  #convert to metric tons Co2/ha
+        crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
   pivot_wider(names_from = crop, values_from = co2_ha) %>% #pivot to have 1 column per crop
   write_csv("results/tables/tableS2_tons_co2_ha_by_crop_and_country.csv")
 ```
@@ -671,6 +672,25 @@ read_csv("int_data/luc_co2_country_crop.csv") %>%  #read in kg co2/ha carbon los
   mutate(Crop = recode(Crop, !!!crop_full_names)) %>% #replace crop names w/full names
   select(Crop, "Baseline"=b, "Projected"=p, "High"=h) %>% #rename cols for presentation and change order of scenarios
   write_csv("results/tables/tableS9_LUC_by_crop.csv")
+```
+
+```{r Table S10. Carbon dioxide loss per hectare by crop for all countries combined}
+#create aggregated dataframe with average carbon value across all countries included in regression analysis, for each crop. this value represents the total difference in carbon between native vegetation and the crop, not the annual value
+read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of total LUC, total soil carbon loss, total veg loss, and avg. crop c stocks
+  select(crop = id, country = ADMIN, soilsum, vegsum, lucsum, cstock, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
+  mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
+  filter(is.na(cstock)==F,  #remove crops with missing crop carbon data
+         !crop %in% c("bean", "coff"), #remove bean & coffee since not matched w/ FOFA and fao data and so not used in analysis
+         country %in% africa_scenario_countries) %>% #remove countries not included in regression analysis
+  group_by(crop) %>% #group by crop
+  summarise(soilH = sum(soilsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE)  * c_to_co2 *  .25, #calculate total tons CO2e lost
+            soilS = sum(soilsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE)  * c_to_co2 *  .4,
+            veg = (sum(vegsum, na.rm = TRUE)/sum(lucsum, na.rm = TRUE) - mean(cstock))  * c_to_co2
+  ) %>% 
+  mutate(`LUC (t CO2e/ha)` = get(paste0("soil",c_loss_selected)) + veg,  #calculate total carbon loss from LUC with selected C loss ratio
+         crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
+  select(Crop=crop, `LUC (t CO2e/ha)`) %>%  #select only crop and LUC columns
+  write_csv("results/tables/tableS10_tCO2_per_ha_loss_by_crop_for_included_countries.csv")
 ```
 #Old Graph and table code
 ```{r Plot GHG data across Africa's regions and for SSA as a whole}
