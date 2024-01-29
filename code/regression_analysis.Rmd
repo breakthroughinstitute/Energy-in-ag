@@ -610,10 +610,12 @@ ggsave(plot = figS2, filename = "results/graphs/supplementary/figs2.png", width 
 
 #Create and Export Tables
 ```{r Table 1. Africa Yield and Harvested Area and Arable Area by Scenario}
+decimals <- 1 #define number of decimals to round to
+
 scenarios %>% filter(country=="Africa") %>% 
-  mutate(yield = round(yield/1000000, digits = 2), #convert to million kcal/ha
-         harv_area = round(harv_area/1000000, digits = 2), #convert to million ha
-         arable_area = round(arable_area/1000000, digits = 2)) %>% #convert to million ha
+  mutate(yield = round(yield/1000000, digits = decimals), #convert to million kcal/ha
+         harv_area = round(harv_area/1000000, digits = decimals), #convert to million ha
+         arable_area = round(arable_area/1000000, digits = decimals)) %>% #convert to million ha
   select("Scenario"=scenario, "Yield (million kcal/ha)" = yield, 
          "Harvested Area (million ha)" = harv_area, "Arable Area (million ha)" = arable_area) %>% 
   arrange(Scenario) %>%  #order by scenario order
@@ -624,9 +626,9 @@ scenarios %>% filter(country=="Africa") %>%
 scenarios %>% 
   mutate(scenario = recode(scenario, "b"="Baseline","p"="Projected", "h"="High"), #rename scenarios for presentation
          country = recode(country, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa"), #change to full names for regions
-         yield = round(yield/1000000, digits = 2), #convert to million kcal/ha
-         harv_area = round(harv_area/1000000, digits = 2), #convert to million ha
-         arable_area = round(arable_area/1000000, digits = 2)) %>% #convert to million ha
+         yield = round(yield/1000000, digits = decimals), #convert to million kcal/ha
+         harv_area = round(harv_area/1000000, digits = decimals), #convert to million ha
+         arable_area = round(arable_area/1000000, digits = decimals)) %>% #convert to million ha
   select("Region"=country, "Scenario"=scenario, "Yield (million kcal/ha)" = yield, 
          "Harvested Area (million ha)" = harv_area, "Arable Area (million ha)" = arable_area) %>%
   arrange(Scenario, Region) %>% #arder by scenario order, and regions alphabetically within
@@ -639,10 +641,12 @@ read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for c
   mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
   filter(country %in% africa_scenario_countries, #filter to just countries included
          !crop %in% c("bean", "coff")) %>%  #remove bean & coffee since not matched w/ FOFA and fao data and so not used in analysis
-  select(crop, country, co2_ha) %>% #select just crops, country, and kg Co2/ha
+  select(crop, Country = country, co2_ha) %>% #select just crops, country, and kg Co2/ha
   mutate(co2_ha = co2_ha / 1000,  #convert to metric tons Co2/ha
         crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
   pivot_wider(names_from = crop, values_from = co2_ha) %>% #pivot to have 1 column per crop
+  mutate(across(-Country, ~round(., digits = decimals))) %>% #round values
+  arrange(Country) %>%  # order country column alphabetically and write to csv
   write_csv("results/tables/tableS2_tons_co2_ha_by_crop_and_country.csv")
 ```
 
@@ -666,10 +670,12 @@ tibble(
 fig_dat %>% 
   mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
   filter(source %in% c(luc_scenario_included, "tot_emiss")) %>% #filter to just LUC and total input emissions
-  select(-lwr, -upr) %>% #remove upper and lower bounds
+  select(-lwr, -upr, -luc) %>% #remove upper and lower bounds
   pivot_wider(names_from = source, values_from = fit) %>% #pivot to have 1 column per source
-  rename(Scenario = scenario, Region = region, LUC = luc_scenario_included, `Input Use` = tot_emiss) %>%  #rename columns for presentation
+  mutate(`Total (Mt CO2e)` = get(luc_scenario_included) + tot_emiss) %>% #add total emissions column
+  rename(Scenario = scenario, Region = region, `LUC (Mt CO2e)` = luc_scenario_included, `Input Use (Mt CO2e)` = tot_emiss) %>%  #rename columns for presentation
   arrange(Scenario, Region) %>%   #arder by scenario order, and regions alphabetically within
+  mutate(across(-c(Scenario, Region), ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS4_LUC_and_total_input_emissions_by_scenario_and_region.csv")
 ```
 
@@ -680,7 +686,8 @@ reg_fe_results %>%
   select(-lwr, -upr) %>% #remove upper and lower bounds
   pivot_wider(names_from = dep_var, values_from = fit) %>% #pivot to have 1 column per source
   rename(Scenario = scenario, Region = region, `Synthetic Fertilizer Application (kg N/ha)` = fert_use_ha) %>%  #rename columns for presentation
-  arrange(Region, Scenario) %>% #order by scenario order, and regions alphabetically within
+  arrange(Scenario, Region) %>% #order by scenario order, and regions alphabetically within
+  mutate(across(-c(Scenario, Region), ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS5_synthetic_nitrogen_fertilizer_application_rate_by_scenario_and_region.csv")
 #kg N synthetic fertilizer per ha
 ```
@@ -693,7 +700,8 @@ reg_fe_results %>%
   pivot_wider(names_from = dep_var, values_from = fit) %>% #pivot to have 1 column per source
   mutate(p_ha=p_ha*1000) %>%  #convert tons/ha to kg/ha
   rename(Scenario = scenario, Region = region, `Pesticide Application (kg/ha)` = p_ha) %>%  #rename columns for presentation
-  arrange(Region, Scenario) %>% #order by scenario order, and regions alphabetically within
+  arrange(Scenario, Region) %>% #order by scenario order, and regions alphabetically within
+  mutate(across(-c(Scenario, Region), ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS6_pesticide_application_rate_by_scenario_and_region.csv")
 #output is in kg pesticide per hectare
 ```
@@ -704,6 +712,7 @@ tibble(
   `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
   `Slope (b1)` = c(fert_emiss_ols$coefficients[2], fert_m_emiss_ols$coefficients[2], pest_emiss_ols$coefficients[2], en_emiss_ols$coefficients[2], m_emiss_ols$coefficients[2]),
   `Intercept (b0)` = c(fert_emiss_ols$coefficients[1], fert_m_emiss_ols$coefficients[1], pest_emiss_ols$coefficients[1], en_emiss_ols$coefficients[1], m_emiss_ols$coefficients[1])) %>%
+  mutate(across(-`Emission Source`, ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS7a_region_model_slopes_and_intercepts.csv")
 
 #generate table with the slope coefficient and intercept from the regression models with AFrica data aggregated
@@ -711,6 +720,7 @@ tibble(
   `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
   `Slope (b1)` = c(afr_fert_emiss_ols$coefficients[2], afr_fert_m_emiss_ols$coefficients[2], afr_pest_emiss_ols$coefficients[2], afr_en_emiss_ols$coefficients[2], afr_m_emiss_ols$coefficients[2]),
   `Intercept (b0)` = c(afr_fert_emiss_ols$coefficients[1], afr_fert_m_emiss_ols$coefficients[1], afr_pest_emiss_ols$coefficients[1], afr_en_emiss_ols$coefficients[1], afr_m_emiss_ols$coefficients[1])) %>%
+  mutate(across(-`Emission Source`, ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS7b_africa_model_slopes_and_intercepts.csv")
 ```
 
@@ -723,6 +733,7 @@ tibble(
   `Northern Africa` = c(fert_emiss_ols$coefficients["factor(country)Northern"], fert_m_emiss_ols$coefficients["factor(country)Northern"], pest_emiss_ols$coefficients["factor(country)Northern"], en_emiss_ols$coefficients["factor(country)Northern"], m_emiss_ols$coefficients["factor(country)Northern"]),
   `Southern Africa` = c(fert_emiss_ols$coefficients["factor(country)Southern"], fert_m_emiss_ols$coefficients["factor(country)Southern"], pest_emiss_ols$coefficients["factor(country)Southern"], en_emiss_ols$coefficients["factor(country)Southern"], m_emiss_ols$coefficients["factor(country)Southern"]),
   `Western Africa` = c(fert_emiss_ols$coefficients["factor(country)Western"], fert_m_emiss_ols$coefficients["factor(country)Western"], pest_emiss_ols$coefficients["factor(country)Western"], en_emiss_ols$coefficients["factor(country)Western"], m_emiss_ols$coefficients["factor(country)Western"])) %>%
+  mutate(across(-`Emission Source`, ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS8_region_model_fixed_effects.csv")
 ```
 
@@ -738,6 +749,7 @@ read_csv("int_data/luc_co2_country_crop.csv") %>%  #read in kg co2/ha carbon los
   pivot_wider(names_from = scenario, values_from = sum_luc) %>% #pivot to wide format
   mutate(Crop = recode(Crop, !!!crop_full_names)) %>% #replace crop names w/full names
   select(Crop, "Baseline"=b, "Projected"=p, "High"=h) %>% #rename cols for presentation and change order of scenarios
+  mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS9_LUC_mha_by_crop.csv")
 ```
 
@@ -759,6 +771,7 @@ read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of
   mutate(`LUC (t CO2e/ha)` = get(paste0("soil",c_loss_selected)) + veg,  #calculate total carbon loss from LUC with selected C loss ratio
          crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
   select(Crop=crop, `LUC (t CO2e/ha)`) %>%  #select only crop and LUC columns
+  mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS10_tCO2_per_ha_loss_by_crop_for_included_countries.csv")
 ```
 
@@ -768,6 +781,7 @@ luc_co2_region %>% select(Region = region, scenario, c_loss_ratio, luc) %>%
   mutate(luc = luc / 1000000) %>% #convert to million ha
   pivot_wider(names_from = scenario, values_from = luc) %>% #pivot to wide format
   select(Region, Baseline, Projected, High) %>%  #select and reorder columns
+  mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS11_LUC_mha_by_region.csv")
 ```
 
@@ -777,6 +791,7 @@ reg_linear_afr_results %>%
   filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
   select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
+  mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS12_LUC_and_total_input_emissions_mha_by_region_linear_model.csv")
 ```
 
@@ -785,6 +800,7 @@ afr_1990_results %>%
   filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
   select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
+  mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS13_LUC_and_total_input_emissions_mha_by_region_post1990.csv")
 ```
 #Old Graph and table code
