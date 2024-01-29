@@ -223,7 +223,7 @@ filter_reg <- filter_reg %>%
          tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha) #total emissions per ha in MMT CO2e
 ```
 
-```{r Run OLS linear regressions with filtered regression data to estimate relationship between yield and input use factor}
+```{r Run OLS log-log regressions with filtered regression data to estimate relationship between yield and input use factor}
 #regressions have country fixed effect where africa regions (e.g. east, west) are used as countries, enabling prediction later
 
 #models for emissions per ha
@@ -372,7 +372,7 @@ luc_co2_region <- read_csv("int_data/luc_co2_region.csv") %>%  #read in kg CO2e 
 luc_co2_region <- luc_co2_region %>% 
   bind_rows(luc_co2_region %>% 
               group_by(scenario, c_loss_ratio) %>% 
-              summarise(luc_co2_low = sum(luc_co2_low), luc_co2_high = sum(luc_co2_high)) %>% 
+              summarise(luc_co2_low = sum(luc_co2_low), luc_co2_high = sum(luc_co2_high), luc = sum(luc)) %>% 
               ungroup() %>% 
               mutate(region = "Africa"))
 
@@ -381,6 +381,73 @@ all_emiss <- inner_join(region_totals, luc_co2_region, by = c("scenario", "regio
 
 write_csv(all_emiss,"results/all_emiss_region.csv")
 ```
+
+#Sensitivity analysis
+```{r Calculate LUC and total input emissions by scenario and region, under linear model}
+#fit linear model to filtered data set with african regions aggregated
+afr_tot_emiss_linear_mod <- lm(africa_level_reg, formula = tot_emiss_ha ~ yield + factor(country))
+
+#Generate predictions for Africa under each yield scenario
+reg_linear_afr_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
+i=1
+for (scenario in unique(scenarios$scenario)){
+  reg_linear_afr_results[i,] = c("tot_emiss_ha", 
+                         scenario, 
+                         "Africa", 
+                         as.list(as_vector(predict(afr_tot_emiss_linear_mod, #choose regression model 
+                              newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
+                              interval = "confidence", level = 0.95
+                              ))))
+    i=i+1
+  }
+
+#Calculate total predicted input emissions for scenario
+reg_linear_afr_results <- reg_linear_afr_results %>% 
+  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
+  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
+  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
+  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
+  pivot_wider(names_from = dep_var, values_from = total_emiss) %>% rename(tot_emiss = tot_emiss_ha)  #make dataframe wide
+
+#Add LUC
+reg_linear_afr_results <- inner_join(reg_linear_afr_results, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
+  mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
+```
+
+```{r Calculate LUC and total input emissions by scenario and region, with data filter to after 1990}
+#re-run log-log regression with data filterted to adfter 1990, which is when pesticide use data is first available. all values are NA before then
+#fit linear model to filtered data set with african regions aggregated
+afr_tot_emiss_1990_mod <- lm(africa_level_reg %>% filter(year>=1990), formula = log(tot_emiss_ha) ~ log(yield) + factor(country))
+
+#Generate predictions for Africa under each yield scenario
+afr_1990_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
+i=1
+for (scenario in unique(scenarios$scenario)){
+  afr_1990_results[i,] = c("tot_emiss_ha", 
+                         scenario, 
+                         "Africa", 
+                         as.list(as_vector(predict(afr_tot_emiss_1990_mod, #choose regression model 
+                              newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
+                              interval = "confidence", level = 0.95
+                              ))))
+    i=i+1
+  }
+
+#Calculate total predicted input emissions for scenario
+afr_1990_results <- afr_1990_results %>% 
+  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
+  mutate(value = exp(value)) %>% #convert from log scale to original scale
+  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
+  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
+  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
+  pivot_wider(names_from = dep_var, values_from = total_emiss) %>% rename(tot_emiss = tot_emiss_ha)  #make dataframe wide
+
+#Add LUC
+afr_1990_results <- inner_join(afr_1990_results, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
+  mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
+afr_1990_results %>% filter(estimate == "fit", c_loss_ratio == "H")
+```
+
 
 #Graph results
 ```{r Set BTI style guide for  graphing}
@@ -418,7 +485,7 @@ theme_bti <- function (base_size = 14, base_family = "Helvetica") {
 ```
 
 ```{r Set up data for graphing and tables}
-c_loss_selected <- "H" #edit to change which soil carbon loss scenario is used for following graphs. options are L, H
+c_loss_selected <- "S" #edit to change which soil carbon loss scenario is used for following graphs. options are S (searchinger), H (houghton)
 luc_scenario_excluded <- "low" #edit to change which LUC scenario is used for following graphs. options are low and high
 luc_scenario_included <- "luc_co2_high" #as above options are luc_co2_low and luc_co2_high
 
@@ -671,10 +738,12 @@ read_csv("int_data/luc_co2_country_crop.csv") %>%  #read in kg co2/ha carbon los
   pivot_wider(names_from = scenario, values_from = sum_luc) %>% #pivot to wide format
   mutate(Crop = recode(Crop, !!!crop_full_names)) %>% #replace crop names w/full names
   select(Crop, "Baseline"=b, "Projected"=p, "High"=h) %>% #rename cols for presentation and change order of scenarios
-  write_csv("results/tables/tableS9_LUC_by_crop.csv")
+  write_csv("results/tables/tableS9_LUC_mha_by_crop.csv")
 ```
 
 ```{r Table S10. Carbon dioxide loss per hectare by crop for all countries combined}
+c_to_co2 <- 44/12 #conversion factor from carbon to CO2
+
 #create aggregated dataframe with average carbon value across all countries included in regression analysis, for each crop. this value represents the total difference in carbon between native vegetation and the crop, not the annual value
 read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of total LUC, total soil carbon loss, total veg loss, and avg. crop c stocks
   select(crop = id, country = ADMIN, soilsum, vegsum, lucsum, cstock, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
@@ -691,6 +760,32 @@ read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of
          crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
   select(Crop=crop, `LUC (t CO2e/ha)`) %>%  #select only crop and LUC columns
   write_csv("results/tables/tableS10_tCO2_per_ha_loss_by_crop_for_included_countries.csv")
+```
+
+```{r Table S11. LUC (million ha) by region and scenario}
+luc_co2_region %>% select(Region = region, scenario, c_loss_ratio, luc) %>% 
+  filter(c_loss_ratio == c_loss_selected) %>% 
+  mutate(luc = luc / 1000000) %>% #convert to million ha
+  pivot_wider(names_from = scenario, values_from = luc) %>% #pivot to wide format
+  select(Region, Baseline, Projected, High) %>%  #select and reorder columns
+  write_csv("results/tables/tableS11_LUC_mha_by_region.csv")
+```
+
+```{r Table S12. Sensitivity analysis: LUC and total input emissions by scenario and region, under linear model}
+#generate table with the sensitivity analysis results for LUC and total input emissions by scenario and region, under linear model
+reg_linear_afr_results %>% 
+  filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
+  select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
+  mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
+  write_csv("results/tables/tableS12_LUC_and_total_input_emissions_mha_by_region_linear_model.csv")
+```
+
+```{r Table S13. Sensitivity analysis: LUC and total input emissions by scenario and region, data filtered to >=1990}
+afr_1990_results %>% 
+  filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
+  select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
+  mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
+  write_csv("results/tables/tableS13_LUC_and_total_input_emissions_mha_by_region_post1990.csv")
 ```
 #Old Graph and table code
 ```{r Plot GHG data across Africa's regions and for SSA as a whole}
