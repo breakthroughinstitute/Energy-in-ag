@@ -17,10 +17,12 @@ d <- d %>% #filter data to arable land, harvested area, yield and cropping inten
 d <- d %>%  
   mutate(b_h = p_2050/y_2012,     #baseline harvested area = 2050 production/2012 yield = (2050 harvested area * 2050 yield) / 2012 yield
          p_h = p_2050/y_2050,      #projected harvested area = 2050 production/2050 yield = 2050 harvested area * (2050 yield/2050 yield) = 2050 harvested area
-         h_h = ifelse(p_h < a_2012 * c_2050, p_h, a_2012 * c_2050), #high harvested area = 2012 arable area, harvested with 2050 cropping intensity = (2012 harvested area/2012 cropping intensity)*2050 cropping intensity. Except it equals projected area when that's lower, ensuring that the high yield scenario doesn't have greater arable area and loer yields than projected scenario for places where area is already proejcted to decrease.
+         
          b_a = b_h/c_2012,   #baseline arable land = baseline harvested area/2012 cropping intensity
          p_a = p_h/c_2050,   #projected arable land = projected harvested area/2050 cropping intensity
-         h_a = h_h/c_2050,   #high arable land area = projected harvested area/2050 cropping intensity = 2012 arable land area. This indicate no change in  area.
+         
+         h_a = ifelse(p_a < a_2012, p_a, a_2012),  #high arable land area is set to 2012 arable land area, to represent scenario w/ high enough yields to avoid land use change Except its set to projected arable area when that is less than 2012 arable area
+         h_h = h_a*c_2050,  #high harvested area = high arable land * 2050 cropping intensity
          
          b_p = p_2050, #production is 2050 for all scenarios
          p_p = p_2050, #production is 2050 for all scenarios
@@ -96,10 +98,8 @@ d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
 #clean environment
 rm(citrus, kcal, cereals, cit, fruit, oilseeds, pulses, roots, swp, veg, dried_pulses, swp_yam, other_veg, other_fruit, other_cereals, other_oilseeds, other_roots) 
 
-# Aggregate by region -----------------------------------------------------
-#Define regions
-
-#Member countries within each region are from the UN Statistics division : https://unstats.un.org/unsd/methodology/m49/overview/
+# Define and create regions for aggregation -----------------------------------------------------
+#Define regions. Member countries within each region are from the UN Statistics division : https://unstats.un.org/unsd/methodology/m49/overview/
 country_groupings <- readxl::read_excel("raw_data/UNSD — Methodology.xlsx")
 
 Africa <- country_groupings %>% filter(`Region Name`=="Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
@@ -115,6 +115,14 @@ Africa[which(!Africa %in% unique(d$CountryName))]
 #match all possible, based on manual examination of FOFA countries. Most non-matching ones aren't listed separately in FOFA
 d$CountryName <- recode(d$CountryName, "Republic of the Congo" = "Congo", "Côte d'Ivoire"="Côte d’Ivoire", "Swaziland" = "Eswatini")
 
+
+#Filter out countries not included in CO2_loss dataset
+CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, id, tot_H, tot_S) #Import csv with total kg CO2 emitted (veg CO2 loss and soil CO2 loss) per ha LUC of a particular crop, by country in Africa. This table include values using Searchinger's 40% (S) and Houghton's 25% (H) estimates of soil carbon loss for cropland conversion
+
+CO2_loss <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) #change African country names in World_CO2_loss so that they match Africa list
+
+d <- d %>% filter(CountryName %in% CO2_loss$country) #filter out countries not included in CO2_loss dataset
+
 #add column for region
 d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign region name if country is in the list of countries for that region
                                      CountryName %in% E_Afr ~ "E_Afr",
@@ -125,15 +133,40 @@ d <- d %>% mutate(region = case_when(CountryName %in% W_Afr ~ "W_Afr", #assign r
 
 africa_scenario_countries <- d %>% filter(Africa=="Africa") %>% select(CountryName) %>% distinct() %>% pull()
 un_countries_excluded_from_fofa <- Africa[which(!Africa %in% unique(d$CountryName))]
-write.csv(africa_scenario_countries, file = "int_data/countries_included_in_africa.csv")
-write.csv(un_countries_excluded_from_fofa, file = "int_data/countries_excluded_in_africa.csv")
+write.csv(africa_scenario_countries, file = "int_data/countries_included_in_africa_in_fofa.csv")
+write.csv(un_countries_excluded_from_fofa, file = "int_data/countries_excluded_in_africa_in_fofa.csv")
 
-#select only columns for scenarios
-scenario_d <- select(d, -ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>% filter(is.na(Africa)==F)
+# Filter to crops included in CO2 loss/QGIS dataset -----------------------
+#Convert FOFA crop names to MAPSPAM style crop names
+d[d=="Bananas"] <- "banp"
+d[d=="Plantains and others"] <- "banp"
+d[d =="Barley"] <- "barl"
+#no bean or coffee item in FOFA & kcal conversion corresponding to MAPSPAM bean & coff items
+d[d =="Cassava"] <- "cass"
+d[d=="Cottonseed"] <- "cott"
+d[d =="Groundnuts, with shell"] <- "grou"
+d[d=="Maize"] <- "maiz"
+d[d=="Millet"] <- "mill"
+d[d=="Other oilseeds"] <- "ooil"
+d[d =="Dried pulses"] <- "opul"
+d[d =="Potatoes"] <- "pota"
+d[d =="Rice, paddy"] <- "rice"
+d[d=="Sorghum"] <- "sorg"
+d[d=="Soybeans"] <- "soyb"
+d[d =="Sugar beet"] <- "sugb"
+d[d=="Sugar cane"] <- "sugc"
+d[d=="Sweet Potato and Yams"] <- "swpy"
+d[d=="Wheat"] <- "whea"
 
-#create columns for each variable, but not each scenario. make dataframe long, then spread variable names
-scenario_d <- scenario_d %>% pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>%
-  pivot_wider(names_from = var, values_from = val)
+d <- d %>% filter(Item %in% unique(CO2_loss$id)) #filter out crops not included in CO2_loss dataset
+
+# Aggregate by region -----------------------------------------------------
+scenario_d <- d %>% 
+  select(-ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>%  #select only columns for scenarios
+  filter(is.na(Africa)==F) %>% 
+  pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>% #create columns for each variable, but not each scenario. make dataframe long, 
+  group_by(Item, Element, CountryName, region, Africa, scenario, var) %>% summarize(val=sum(val)) %>% #summarize for crops that werent grouped in FOFA but are in MAPSPAM e.g. bananas and plantains
+  pivot_wider(names_from = var, values_from = val) #then spread variable names
 
 #summarize each variable by Africa region and scenario
 regions_scenario <- scenario_d %>% group_by(region, scenario) %>%
@@ -157,49 +190,18 @@ regions_scenario <- rbind(regions_scenario, Africa_scenario)
 #save Scenarios' (yield, harvested area, and production) data
 write_csv(regions_scenario,"int_data/scenarios.csv")
 
-# Calculate avg CO2 loss by crop & country --------------------------------
-
-#Import csv with total kg CO2 emitted (veg CO2 loss and soil CO2 loss) per ha LUC of a particular crop, by country in Africa. 
-#This table include values using Searchinger's 40% (S) and Houghton's 25% (H) estimates of soil carbon loss for cropland conversion
-CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, id, tot_H, tot_S)
-
-#change African country names in World_CO2_loss so that they match Africa list
-CO2_loss <- CO2_loss %>% mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) 
-
 # # Calculate total LUC CO2 by country and scenario -------------------------------------------------
-LUC <- d
-
-#Convert FOFA crop names to MAPSPAM style crop names
-LUC[LUC=="Bananas"] <- "banp"
-LUC[LUC=="Plantains and others"] <- "banp"
-LUC[LUC =="Barley"] <- "barl"
-#no bean or coffee item in FOFA & kcal conversion corresponding to MAPSPAM bean & coff items
-LUC[LUC =="Cassava"] <- "cass"
-LUC[LUC=="Cottonseed"] <- "cott"
-LUC[LUC =="Groundnuts, with shell"] <- "grou"
-LUC[LUC=="Maize"] <- "maiz"
-LUC[LUC=="Millet"] <- "mill"
-LUC[LUC=="Other oilseeds"] <- "ooil"
-LUC[LUC =="Dried pulses"] <- "opul"
-LUC[LUC =="Potatoes"] <- "pota"
-LUC[LUC =="Rice, paddy"] <- "rice"
-LUC[LUC=="Sorghum"] <- "sorg"
-LUC[LUC=="Soybeans"] <- "soyb"
-LUC[LUC =="Sugar beet"] <- "sugb"
-LUC[LUC=="Sugar cane"] <- "sugc"
-LUC[LUC=="Sweet Potato and Yams"] <- "swpy"
-LUC[LUC=="Wheat"] <- "whea"
 
 #sum irrigated and rainfed LUC by country, item and scenario, keeping region variable. note this combines LUC for bananas & plantains into banp
-LUC <- LUC %>% group_by(Item, CountryName, region) %>% summarize(across(c(b_l, p_l, h_l), \(x) sum(x, na.rm=T))) %>%
+d <- d %>% group_by(Item, CountryName, region) %>% summarize(across(c(b_l, p_l, h_l), \(x) sum(x, na.rm=T))) %>%
   filter(CountryName %in% Africa) #Only include African countries
 
 #list crops that are in fofa and kcal that are excluded from analysis since missing in mapspam & searchinger
-fofa_kcal_excluded_from_mapspam_searchinger <- anti_join(LUC, CO2_loss, by = c("Item" = "id")) %>% ungroup() %>% select(Item) %>% unique() %>% pull() 
+fofa_kcal_excluded_from_mapspam_searchinger <- anti_join(d, CO2_loss, by = c("Item" = "id")) %>% ungroup() %>% select(Item) %>% unique() %>% pull() 
 write.csv(fofa_kcal_excluded_from_mapspam_searchinger, "int_data/fofa_kcal_excluded_from_mapspam_searchinger.csv")
 
 #join co2/ha value to LUC dataframe and calculate total LUC CO2 loss/emissions by crop
-LUC_CO2 <- inner_join(LUC, CO2_loss, by = c("CountryName" = "country", "Item" = "id")) %>%  #should eliminate crops in LUC dataset that do not have corresponding crop match in the CO2_loss dataset (derived from MAPSPAM analysis). 
+LUC_CO2 <- inner_join(d, CO2_loss, by = c("CountryName" = "country", "Item" = "id")) %>%  #should eliminate crops in LUC dataset that do not have corresponding crop match in the CO2_loss dataset (derived from MAPSPAM analysis). 
   pivot_longer(c(b_l, p_l, h_l), names_to = c("scenario", "x"), names_sep = "_", values_to = "luc") %>%  #make long
   pivot_longer(c(tot_H, tot_S), names_to = c("y", "c_loss_ratio"), names_sep = "_", values_to = "co2_ha") %>%
   select(-x,-y) %>%
@@ -213,12 +215,15 @@ LUC_CO2 <- inner_join(LUC, CO2_loss, by = c("CountryName" = "country", "Item" = 
 #Aggregate LUC CO2 emissions by country
 LUC_CO2_country <- LUC_CO2 %>% group_by(CountryName, scenario, c_loss_ratio, region) %>% 
   summarize(co2_low = sum(co2_low, na.rm=T), 
-            co2_high = sum(co2_high, na.rm=T)) %>% 
+            co2_high = sum(co2_high, na.rm=T),
+            luc = sum(luc, na.rm=T)) %>% 
   rename(Country = CountryName)
 
 #Aggregate LUC CO2 emissions by region
 LUC_CO2_region <- LUC_CO2_country %>% group_by(region, scenario, c_loss_ratio) %>% 
-  summarize(co2_low = sum(co2_low, na.rm=T), co2_high = sum(co2_high, na.rm=T))
+  summarize(co2_low = sum(co2_low, na.rm=T), 
+            co2_high = sum(co2_high, na.rm=T),
+            luc = sum(luc, na.rm=T))
 
 # Save output -------------------------------------------------------------
 write_csv(LUC_CO2,"int_data/luc_co2_country_crop.csv")
