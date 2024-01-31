@@ -240,35 +240,6 @@ fert_use_ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(
 m_energy_ols <- lm(filter_reg, formula = log(m_energy_ha) ~ log(yield) + factor(country))#Energy embodied in machinery OLS regression
 ```
 
-```{OLS regression with africa data aggregated at continent level}
-#fit regression models again with data for african countries and regions aggregated at the continent level. this lets us make continent-level predictions below with proper uncertainty levels
-africa_level_reg <- filter_reg %>% mutate(country = recode(country, "Eastern"="Africa", "Western"="Africa","Middle"="Africa","Southern"="Africa","Northern"="Africa")) %>%
-                                            group_by(country, year) %>% 
-                                            summarize(across(c(en_emiss, fert_emiss, pest_use, fert_use, m_energy, tot_kcal, cropland), sum, na.rm=T)) %>%
-                                            mutate(yield = tot_kcal/cropland, 
-                                                   en_emiss_ha = en_emiss * Gg_to_mt/cropland, #convert to consistent emissions values, as in above chunk
-                                                   fert_emiss_ha = fert_emiss * Gg_to_mt/cropland, 
-                                                   fert_m_emiss_ha = fert_use * fert_ef * kg_to_mt/cropland, 
-                                                   m_emiss_ha = m_energy * tpes_ef * tons_to_mt/cropland,
-                                                   pest_emiss_ha = pest_use * pest_ef * tons_to_mt /cropland,
-                                                   tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha,
-                                                   p_ha = pest_use/cropland, #calculate africa-wide input use per hectare
-                                                   fert_use_ha = fert_use/cropland)
-
-africa_level_reg <- naniar::replace_with_na_all(data = africa_level_reg, condition = ~.x == 0) #replace 0s with NA 
-
-#models for emissions per ha
-afr_en_emiss_ols <- lm(africa_level_reg, formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Energy Emissions OLS Regression
-afr_fert_emiss_ols <- lm(africa_level_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N emissions OLS Regression
-afr_fert_m_emiss_ols <- lm(africa_level_reg, formula = log(fert_m_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N manufacturing emissions OLS Regression
-afr_m_emiss_ols <- lm(africa_level_reg, formula = log(m_emiss_ha) ~ log(yield) + factor(country)) #Energy embodied in machinery OLS Regression
-afr_pest_emiss_ols <- lm(africa_level_reg, formula = log(pest_emiss_ha) ~ log(yield) + factor(country)) #Pesticides manufacturing emissions OLS Regression
-afr_tot_emiss_ols <- lm(africa_level_reg, formula = log(tot_emiss_ha) ~ log(yield) + factor(country)) #Total emissions OLS Regression
-
-#models for input use per ha
-afr_p_ols <- lm(africa_level_reg, formula = log(p_ha) ~ log(yield) + factor(country)) #Pesticides Use OLS regression
-afr_fert_use_ols <- lm(africa_level_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))#Synthetic N use or application OLS regression
-```
 
 ```{r Sanity Check on parameters - optional for running}
 #Check to see that that the model fitted values match the log(actual values) in the regression dataset, values should fall around 1:1 line
@@ -292,8 +263,7 @@ reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = c
 
 i=1
 #define regions to loop through
-regions <- unique(scenarios$country)
-regions <- regions[!regions =="Africa"]
+regions <- c("Eastern","Middle","Northern","Southern","Western")
 
 #map variables to model names
 var_models = tibble(var = c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha", "p_ha", "fert_use_ha"),
@@ -315,29 +285,14 @@ for (dependent_variable in var_models$var) {
   }
 }
 
-#Add predictions for Africa to above dataframe of predicted input use per ha by input, scenario and region
-for (dependent_variable in var_models$var) {
-  for (scenario in unique(scenarios$scenario)){
-    reg_fe_results[i,] = c(dependent_variable, 
-                            scenario, 
-                            "Africa", 
-                            as.list(as_vector(predict(
-                              get(paste0("afr_",var_models$model[var_models$var==dependent_variable])), #choose regression model 
-                              newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
-                              interval = "confidence", level = 0.95
-                              ))))
-    i=i+1
-  }
-}
-
-#exponentiate estimates and confidence intervals (not SE)
+#exponentiate estimates and confidence intervals
 reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr = exp(upr)) 
   
 #convert scenario in reg_fe_results to factor variable
 reg_fe_results <- reg_fe_results %>% mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High")))
 ```
 
-```{r Calculate total predicted emissions for each input source, region, and scenario}
+```{r Calculate total input emissions for each input source and region}
 #create dataframe with only totals for each emissions type and for all input emissions, by region and scenario
 region_totals <- reg_fe_results %>% 
   filter(dep_var %in% c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha")) %>% #filter to only emissions variables
@@ -355,6 +310,224 @@ names(region_totals)[names(region_totals) == "m_emiss_ha"] <- "m_emiss"
 names(region_totals)[names(region_totals) == "pest_emiss_ha"] <- "pest_emiss"
 names(region_totals)[names(region_totals) == "tot_emiss_ha"] <- "tot_emiss"
 ```
+
+```{r Calculate total emissions per ha from input use by region and scenario}
+#create dataframe for predictions by region
+scenarios_predictions <- scenarios %>% 
+  filter(country!="Africa")
+
+scenarios_predictions <- scenarios_predictions %>% #add predictions of per hectare emissions for each region
+  mutate(
+    en_emiss_ha = exp(predict(en_emiss_ols, newdata = scenarios_predictions)),
+    fert_emiss_ha = exp(predict(fert_emiss_ols, newdata = scenarios_predictions)),
+    fert_m_emiss_ha = exp(predict(fert_m_emiss_ols, newdata = scenarios_predictions)),
+    m_emiss_ha = exp(predict(m_emiss_ols, newdata = scenarios_predictions)),
+    pest_emiss_ha = exp(predict(pest_emiss_ols, newdata = scenarios_predictions)),
+    tot_emiss_ha_single_mod = exp(predict(tot_emiss_ols, newdata = scenarios_predictions)),
+    tot_emiss_ha = en_emiss_ha+fert_emiss_ha+fert_m_emiss_ha+m_emiss_ha+pest_emiss_ha)
+
+#calculate variance and 95% CI for total emissions per ha for each region
+library(car)
+
+# Function to calculate variance using delta method
+calculate_variance <- function(model, new_data) {
+  predictions <- predict(model, newdata = new_data, se.fit = TRUE)
+  se_log <- predictions$se.fit
+  pred_log <- predictions$fit
+  pred <- exp(pred_log)
+  var_pred <- (exp(2 * pred_log) * se_log^2)
+  return(var_pred)
+}
+
+# Calculating variances
+var_en <- calculate_variance(en_emiss_ols, scenarios_predictions)
+var_f <- calculate_variance(fert_emiss_ols, scenarios_predictions)
+var_f_m <- calculate_variance(fert_m_emiss_ols, scenarios_predictions)
+var_m <- calculate_variance(m_emiss_ols, scenarios_predictions)
+var_p <- calculate_variance(pest_emiss_ols, scenarios_predictions)
+
+
+# Summing variances
+scenarios_predictions$total_var <- var_en + var_f + var_f_m + var_m + var_p
+
+# Calculating 95% CI
+z <- qnorm(0.975) # Z value for 95% CI
+scenarios_predictions <- scenarios_predictions %>%
+  mutate(
+    ci_lower = tot_emiss_ha - z * sqrt(total_var),
+    ci_upper = tot_emiss_ha + z * sqrt(total_var)
+  )
+```
+
+```{r Calculate total emissions from input use for Africa}
+#Calculate total emissions for each source, region and scenario
+scenarios_predictions <- scenarios_predictions %>% 
+  mutate(tot_t = tot_emiss_ha * arable_area,
+         tot_e = en_emiss_ha * arable_area,
+         tot_f = fert_emiss_ha * arable_area,
+         tot_fm = fert_m_emiss_ha * arable_area,
+         tot_m = m_emiss_ha * arable_area,
+         tot_p = pest_emiss_ha * arable_area) 
+
+#Calculate Variance for Each emission source, region and scenario 
+scenarios_predictions <- scenarios_predictions %>% 
+  mutate(
+    var_t = (arable_area^2)* total_var,
+    var_e = (arable_area^2)* var_en,
+    var_f = (arable_area^2)* var_f,
+    var_fm = (arable_area^2)* var_f_m,
+    var_m = (arable_area^2)* var_m,
+    var_p = (arable_area^2)* var_p
+  )
+
+#calculate Africa sum emissions and sum variance
+africa_sums <- scenarios_predictions %>% 
+  group_by(scenario) %>% 
+  summarize(across(c(tot_t, tot_e, tot_f, tot_fm, tot_m, tot_p, 
+                     var_t, var_e, var_f, var_fm, var_m, var_p), sum)) %>% 
+  pivot_longer(cols = -scenario, names_to = c(".value", "estimate"), names_pattern = "(.*)_(.*)")
+
+#Calculate Confidence Interval
+z <- qnorm(0.975) # Z value for 95% CI
+
+africa_sums <- africa_sums %>% 
+  mutate(
+    lwr = tot - z * sqrt(var),
+    upr = tot + z * sqrt(var)
+  )
+africa_sums
+```
+
+
+```{r Calculate total input emissions for Africa with 95% confidence interval}
+#we calculate the sum separately since calculating a confidence interval for teh sum requires careful treatment
+
+#map models to model names
+models <- list(en_emiss_ols, fert_emiss_ols, fert_m_emiss_ols, m_emiss_ols, pest_emiss_ols, tot_emiss_ols)
+model_names <- c("en_emiss", "fert_emiss", "fert_m_emiss", "m_emiss", "pest_emiss", "tot_emiss")
+scenario_names <- c("Baseline", "Projected", "High")
+
+#Define function to calculate sum and confidence interval across the regions
+calculate_sum_and_ci <- function(model_name){
+  # Extract coefficients and variance-covariance matrix
+  beta <- coef(model_name)
+  V <- vcov(model_name)
+                      
+  # Structure prediction data for calculation
+  
+  predictions <- reg_fe_results %>%  #extract exponentiated log values (per ha) from model predictions 
+    filter(dep_var == model_name[["terms"]][[2]][[2]], #filter to dependent variable for this model. 
+                                 region %in% regions) %>% #ensure only correct regions included
+    arrange(scenario, region) %>% #structure in same way as other data to ensure data alignment
+    select(fit) %>% 
+    pull() 
+  
+  yields <- scenarios %>% #extract yield values for each region and scenario
+    filter(country %in% regions) %>% 
+    arrange(scenario, country) %>% 
+    select(country, yield) %>% 
+    pull()
+  
+  l_values <- scenarios %>% #extract arable land area values for each region and scenario
+    filter(country %in% regions) %>% 
+    arrange(scenario, country) %>% 
+    select(arable_area) %>% 
+    pull() 
+  
+  ## Calculation of derivatives for log yield and fixed effects
+  #map countries to country fixed effects in coeffient table
+  country_coef_indices <- sapply(regions, function(country) {
+    which(names(beta) == paste0("factor(country)", country))
+  })
+  
+  # Number of countries and scenarios
+  num_countries <- length(regions)
+  num_scenarios <- length(predictions) / num_countries
+  country_factors <- rep(regions, num_scenarios)
+  
+  # Initialize a matrix for derivatives for all scenarios
+  derivatives_all_scenarios <- matrix(nrow = length(predictions), ncol = 1 + num_countries)
+  
+  # Loop over each scenario
+  for (scenario in 1:num_scenarios) {
+    # Starting and ending indices for this scenario in the predictions vector
+    start_idx <- (scenario - 1) * num_countries + 1
+    end_idx <- scenario * num_countries
+  
+    # Extract predictions for this scenario
+    scenario_predictions <- predictions[start_idx:end_idx]
+    scenario_yields <- yields[start_idx:end_idx]
+    scenario_l_values <- l_values[start_idx:end_idx]
+    
+    # Fill in the derivatives matrix for log(yield)
+    derivatives_all_scenarios[start_idx:end_idx, 1] <- scenario_predictions * (1 / scenario_yields) * scenario_l_values
+
+      
+    # Fill in derivatives for each country's fixed effect
+    for (i in 1:num_countries) {
+      country_index <- country_coef_indices[i]
+      derivatives_all_scenarios[start_idx:end_idx, i + 1] <- ifelse(country_factors[start_idx:end_idx] == regions[i], scenario_predictions * scenario_l_values, 0)
+    }
+  }
+  
+  # Initialize a vector to store variance of the sum for each scenario
+  var_sum_scenarios <- numeric(num_scenarios)
+  
+  # Loop over each scenario
+  for (scenario in 1:num_scenarios) {
+    # Starting and ending indices for this scenario in the predictions vector
+    start_idx <- (scenario - 1) * num_countries + 1
+    end_idx <- scenario * num_countries
+  
+    # Variance of the sum for this scenario
+    var_sum <- 0
+    for (i in 1:(1 + num_countries)) { # Include log(yield) and the specific countries
+      for (j in 1:(1 + num_countries)) {
+        var_sum <- var_sum + sum(derivatives_all_scenarios[start_idx:end_idx, i] * derivatives_all_scenarios[start_idx:end_idx, j]) * V[i, j]
+      }
+    }
+    var_sum_scenarios[scenario] <- var_sum
+  }
+  
+  # Standard error of the sum for each scenario
+  se_sum_scenarios <- sqrt(var_sum_scenarios)
+  
+  # Calculate the sum, across regions, of the total emissions (predicted per ha value * arable area) for each scenario
+  # Calculate the sum, across regions, for each scenario
+  sum_multiplied_predictions <- tibble(Scenario = character(num_scenarios), Sum = numeric(num_scenarios))
+  for (scenario in 1:num_scenarios) {
+  start_idx <- (scenario - 1) * num_countries + 1
+  end_idx <- scenario * num_countries
+  
+  sum_multiplied_predictions$Scenario[scenario] <- scenario_names[scenario]
+  sum_multiplied_predictions$Sum[scenario] <- sum(predictions[start_idx:end_idx] * l_values[start_idx:end_idx])
+}
+
+# Calculate the confidence interval for each scenario
+ci_lower <- sum_multiplied_predictions$Sum - (1.96 * se_sum_scenarios)
+ci_upper <- sum_multiplied_predictions$Sum + (1.96 * se_sum_scenarios)
+
+# Return results as a dataframe
+return(data.frame(
+  scenario = sum_multiplied_predictions$Scenario,
+  fit = sum_multiplied_predictions$Sum,
+  lwr = ci_lower,
+  upr = ci_upper
+))
+
+}
+
+#apply function to each model
+results_list <- lapply(models, calculate_sum_and_ci)
+names(results_list) <- model_names
+
+#combine into 1 dataframe
+afr_totals <- bind_rows(results_list, .id = "source") %>% 
+  mutate(region = "Africa") %>% 
+  pivot_longer(cols = c(fit, lwr, upr), names_to = "estimate", values_to = "value") %>%
+  pivot_wider(names_from = source, values_from = value)
+```
+
 
 #Add LUC
 ```{r Add LUC data to input emissions data}
@@ -376,7 +549,8 @@ luc_co2_region <- luc_co2_region %>%
               ungroup() %>% 
               mutate(region = "Africa"))
 
-all_emiss <- inner_join(region_totals, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
+all_emiss <- region_totals %>% bind_rows(afr_totals) %>% #combine region and Africa values
+  inner_join(luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
 
 write_csv(all_emiss,"results/all_emiss_region.csv")
@@ -707,6 +881,7 @@ reg_fe_results %>%
 ```
 
 ```{r Table S7. Region and AFrica Model slopes and intercepts}
+#RETURN TO UPDATE w/ new africa estimates
 #generate table with the slope coefficient and intercept from each of the region-based regression models
 tibble(
   `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
@@ -802,683 +977,4 @@ afr_1990_results %>%
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS13_LUC_and_total_input_emissions_mha_by_region_post1990.csv")
-```
-#Old Graph and table code
-```{r Plot GHG data across Africa's regions and for SSA as a whole}
-GHG <- all_emiss #unsure if GHG is meant to be this dataframe. no notes in old script on this or what GHG dataframe is. 
-GHG_Afr <- GHG[GHG$Region == "Africa",] #have separate charts for SSA data to compare to region breakdown
-GHG <- anti_join(GHG, GHG_Afr)
-#GHG_high <- GHG[GHG$Scenario == "High",] #Use High_alt as High
-#GHG <- anti_join(GHG,GHG_high)
-GHG$Scenario <- factor(GHG$Scenario ,levels = c("Baseline", "Projected", "High_alt")) #Change order of bars so it is not in alphabetical order, but rather in the order of the yield-scenarios
-x.axis <- c("Baseline", "Projected", "High")
-
-
-
-#percent stacked bar chart by region
-GHG$Region <- factor(GHG$Region, levels = c("West", "East", "Southern", "Central", "North"))
-GHG$Scenario <- factor(GHG$Scenario ,levels = c("Baseline", "Projected", "High"))
-GHG_region <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) + 
-    geom_bar(position="fill", stat="identity") + ggtitle(expression(paste("% Greenhouse emissions by region in Africa for each scenario"))) + xlab("Scenarios") + ylab("% of each scenario's GHG emissions") + labs(fill = "Regions")  + scale_x_discrete(labels= x.axis) +  theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="solid"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="solid"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=15, face="bold")) 
-      # plot.background = element_rect(fill=NA), legend.key=element_rect(fill=NA)
-GHG_region <- GHG_region  +  scale_fill_manual(values=wes_palette(n=5, name="Darjeeling1")) 
-GHG_region
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region.png", GHG_region) #save ggplot, not great with dimensions, might use current plot window as default plot size and so may need to specify width and height, dims: Saving 7.29 x 4.51 in image
-
-
-#bar chart by region, grouped
-GHG$Region <- factor(GHG$Region, levels = c("West", "East", "Southern", "Central", "North"))
-GHG_region_grouped <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + ggtitle(expression(paste("Greenhouse emissions by scenario and region in Africa"))) + xlab("Scenarios") + ylab("GHG Emissions (Gigagtons CO2eq)") + labs(fill = "Regions")  + scale_x_discrete(labels= x.axis) +  theme_bti()
-
-GHG_region_grouped <- GHG_region_grouped  +  scale_fill_manual(values=bti_colors) 
-ggsave(filename =  "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region_grouped.png", plot = GHG_region_grouped )
-GHG_region_grouped
-
-#Stacked
-GHG_region_stacked <- ggplot(GHG, aes(fill= Region, y= GHG, x= Scenario)) + 
-    geom_bar(position="stack", stat="identity") + ggtitle(expression(paste("Greenhouse emissions by scenario for each region in Africa"))) + xlab("Scenarios") + ylab("GHG emissions (Gt CO2eq)") + labs(fill = "African regions")  + scale_x_discrete(labels= x.axis) +  theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="solid"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="solid"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=15, face="bold")) 
-      # plot.background = element_rect(fill=NA), legend.key=element_rect(fill=NA)
-GHG_region_stacked <- GHG_region  +  scale_fill_manual(values=bti_colors) 
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_region_stacked.png", plot = GHG_region_stacked, width = , height = )
-
-# Africa
-#GHG_Afr_high <- GHG_SSA[GHG_Afr$Scenario == "High",] #Use High_alt as High
-#GHG_Afr <- anti_join(GHG_Afr,GHG_SSA_high)
-GHG_Afr$Scenario <- factor(GHG_Afr$Scenario ,levels = c("Baseline", "Projected", "High_alt"))
-
-GHG_Afr_plot <- ggplot(GHG_Afr, aes(y = GHG, x= Scenario)) + 
-    geom_bar(position= "stack", stat="identity",fill = "#0DC3A8") + ggtitle(expression(paste("Greenhouse emissions by scenario in Africa"))) + xlab("Scenarios") + ylab("GHG Emissions (Gigatons CO2eq)") + labs(fill = "African regions")  + scale_x_discrete(labels= x.axis) +  theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="solid"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="solid"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=15, face="bold"))
- ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/GHG_Afr.png", plot = GHG_Afr_plot )   
-```
-
-```{r Energy emissions by region }
-#Melt data for ggplot
-Energy_emis <- melt(Energy_emis)
-colnames(Energy_emis) <- c("Energy_Scenario", "Region", "Value")
-Energy_emis$Value <- Energy_emis$Value * Gg_to_Gt
-
-#separate scenario from energy source into 2 columns
-Energy_emis$Energy_Scenario <- str_replace(Energy_emis$Energy_Scenario, "synN_use", "synNuse") ##change "syn_use_" to synuse to make it easier to separate values into 2 cols
-Energy_emis$Energy_Scenario <- str_replace(Energy_emis$Energy_Scenario, "h_alt", "alt")
-Energy_emis <- Energy_emis %>% separate(Energy_Scenario, c("Energy Source", "Scenario"), "_")
-
-#Change naming conventions to match that of error bars to making joining easier
-Energy_emis$`Energy Source` <- str_replace(Energy_emis$`Energy Source`, "synNuse","Manufacturing Fertilizers")
-Energy_emis$`Energy Source` <- str_replace(Energy_emis$`Energy Source`, "pest","Manufacturing Pesticides")
-Energy_emis$`Energy Source` <- str_replace(Energy_emis$`Energy Source`, "m","Embodied Energy in Machinery")
-Energy_emis$`Energy Source` <- str_replace(Energy_emis$`Energy Source`, "synN","Synthetic N")
-Energy_emis$`Energy Source` <- str_replace(Energy_emis$`Energy Source`, "fuel","On-Farm Fuel")
-
-Energy_emis$Scenario <- str_replace(Energy_emis$Scenario, "base","Baseline")
-Energy_emis$Scenario <- str_replace(Energy_emis$Scenario, "proj","Projected")
-Energy_emis$Scenario <- str_replace(Energy_emis$Scenario, "alt","High")
-
-#Split data by region
-Energy_emis_E<- filter(Energy_emis, Region == "East")
-Energy_emis_W <- filter(Energy_emis, Region == "West")
-Energy_emis_S <- filter(Energy_emis, Region == "Southern")
-Energy_emis_C <- filter(Energy_emis, Region == "Central")
-Energy_emis_N <- filter(Energy_emis, Region == "North")
-Energy_emis_Afr <- filter(Energy_emis, Region == "Africa")
-Energy_emis_N$Region <- NULL
-Energy_emis_S$Region <- NULL
-Energy_emis_W$Region <- NULL
-Energy_emis_E$Region <- NULL
-Energy_emis_C$Region <- NULL
-Energy_emis_Afr$Region <- NULL
-
-
-```
-
-
-```{r Energy emissions charts by region }
-#Add in upper and lower error bars data for each region and multiply by cropland, emissions & conversions factors if necessary 
-
-#North Africa
-colnames(lwr_N) <- c("Energy Source", "Scenario", "lwr")
-colnames(upr_N) <- c("Energy Source", "Scenario", "upr")
-lwr_N$`Energy Source`<- trimws(lwr_N$`Energy Source`) #eliminate extra spaces in energy source strings
-upr_N$`Energy Source`<- trimws(upr_N$`Energy Source`) #eliminate extra spaces in energy source strings
-lwr_N$Scenario <- str_replace(lwr_N$Scenario, "High_alt", "High")
-upr_N$Scenario <- str_replace(upr_N$Scenario, "High_alt", "High")
-lwr_N$Scenario <- as.character(lwr_N$Scenario)
-upr_N$Scenario <- as.character(upr_N$Scenario)
-
-#join upper and lower 95% CI values from the model with the estimates of energy emissions by source
-Energy_emis_N <- right_join(Energy_emis_N, lwr_N, by = c("Energy Source", "Scenario"))
-Energy_emis_N <- right_join(Energy_emis_N, upr_N, by = c("Energy Source", "Scenario"))
-
-#Multiply 95% CI estimates by cropland  
-Energy_emis_N$cropland[Energy_emis_N$Scenario == "Baseline"] <- area_b$harv_area[area_b$region == "North"]
-Energy_emis_N$cropland[Energy_emis_N$Scenario == "Projected"] <-  area_p$harv_area[area_p$region == "North"]
-Energy_emis_N$cropland[Energy_emis_N$Scenario == "High"] <-  area_h_alt$harv_area[area_h_alt$region == "North"]
-#Converts upper and lower estimates are in Gigagrams or tons (manufacturing pesticides is in tons)
-Energy_emis_N$lwr <- Energy_emis_N$lwr * Energy_emis_N$cropland  
-Energy_emis_N$upr <- Energy_emis_N$upr * Energy_emis_N$cropland 
-
-Energy_emis_N$lwr[Energy_emis_N$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_N$lwr[Energy_emis_N$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef  * kg_to_Gg
-Energy_emis_N$lwr[Energy_emis_N$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_N$lwr[Energy_emis_N$`Energy Source` == "Manufacturing Pesticides"] * pest_ef  * tons_to_Gg
-Energy_emis_N$upr[Energy_emis_N$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_N$upr[Energy_emis_N$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef  * kg_to_Gg
-Energy_emis_N$upr[Energy_emis_N$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_N$upr[Energy_emis_N$`Energy Source` == "Manufacturing Pesticides"] * pest_ef  * tons_to_Gg
-
-#Convert all lower and upper estimates to Gigatons to match the units of the fitted values
-Energy_emis_N$lwr <- Energy_emis_N$lwr * Gg_to_Gt
-Energy_emis_N$upr <- Energy_emis_N$upr * Gg_to_Gt
-
-
-#southern Africa
-colnames(lwr_S) <- c("Energy Source", "Scenario", "lwr")
-colnames(upr_S) <- c("Energy Source", "Scenario", "upr")
-lwr_S$`Energy Source` <- trimws(lwr_S$`Energy Source`)
-upr_S$`Energy Source` <- trimws(upr_S$`Energy Source`)
-lwr_S$Scenario <- str_replace(lwr_S$Scenario , "High_alt", "High")
-upr_S$Scenario <- str_replace(upr_S$Scenario , "High_alt", "High")
-Energy_emis_S <- right_join(Energy_emis_S, lwr_S, by = c("Energy Source", "Scenario"))
-Energy_emis_S <- right_join(Energy_emis_S, upr_S, by = c("Energy Source", "Scenario"))
-
-
-#Multiply 95% CI estimates by cropland  
-Energy_emis_S$cropland[Energy_emis_S$Scenario == "Baseline"] <- area_b$harv_area[area_b$region == "South"]
-Energy_emis_S$cropland[Energy_emis_S$Scenario == "Projected"] <-  area_p$harv_area[area_p$region == "South"]
-Energy_emis_S$cropland[Energy_emis_S$Scenario == "High"] <-  area_h_alt$harv_area[area_h_alt$region == "South"]
-Energy_emis_S$lwr <- Energy_emis_S$lwr * Energy_emis_S$cropland
-Energy_emis_S$upr <- Energy_emis_S$upr * Energy_emis_S$cropland
-
-Energy_emis_S$lwr[Energy_emis_S$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_S$lwr[Energy_emis_S$`Energy Source` == "Manufacturing Fertilizers"]  * fert_ef * kg_to_Gg
-Energy_emis_S$lwr[Energy_emis_S$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_S$lwr[Energy_emis_S$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg 
-Energy_emis_S$upr[Energy_emis_S$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_S$upr[Energy_emis_S$`Energy Source` == "Manufacturing Fertilizers"]  * fert_ef * kg_to_Gg 
-Energy_emis_S$upr[Energy_emis_S$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_S$upr[Energy_emis_S$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg 
-
-#Convert all lower and upper estimates to Gigatons to match the units of the fitted values
-Energy_emis_S$lwr <- Energy_emis_S$lwr * Gg_to_Gt
-Energy_emis_S$upr <- Energy_emis_S$upr * Gg_to_Gt
-
-#west Africa
-colnames(lwr_W) <- c("Energy Source", "Scenario", "lwr")
-colnames(upr_W) <- c("Energy Source", "Scenario", "upr")
-lwr_W$`Energy Source` <- trimws(lwr_W$`Energy Source`)
-upr_W$`Energy Source` <- trimws(upr_W$`Energy Source`)
-lwr_W$Scenario <- str_replace(lwr_W$Scenario , "High_alt", "High")
-upr_W$Scenario <- str_replace(upr_W$Scenario , "High_alt", "High")
-Energy_emis_W <- right_join(Energy_emis_W, lwr_W, by = c("Energy Source", "Scenario"))
-Energy_emis_W <- right_join(Energy_emis_W, upr_W, by = c("Energy Source", "Scenario"))
-
-#Add in lower and upper 95% CI estimates and multiply by cropland to get gigagrams or tons (manufacturing energy sources)
-Energy_emis_W$cropland[Energy_emis_W$Scenario == "Baseline"] <- area_b$harv_area[area_b$region == "West"]
-Energy_emis_W$cropland[Energy_emis_W$Scenario == "Projected"] <-  area_p$harv_area[area_p$region == "West"]
-Energy_emis_W$cropland[Energy_emis_W$Scenario == "High"] <-  area_h_alt$harv_area[area_h_alt$region == "West"]
-Energy_emis_W$lwr <- Energy_emis_W$lwr * Energy_emis_W$cropland 
-Energy_emis_W$upr <- Energy_emis_W$upr * Energy_emis_W$cropland
-
-#Convert manufacturing fert and pest to Gg 
-Energy_emis_W$lwr[Energy_emis_W$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_W$lwr[Energy_emis_W$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg 
-Energy_emis_W$lwr[Energy_emis_W$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_W$lwr[Energy_emis_W$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg
-Energy_emis_W$upr[Energy_emis_W$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_W$upr[Energy_emis_W$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg
-Energy_emis_W$upr[Energy_emis_W$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_W$upr[Energy_emis_W$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg 
-
-#Convert all lower and upper estimates to Gigatons to match the units of the fitted values
-Energy_emis_W$lwr <- Energy_emis_W$lwr * Gg_to_Gt
-Energy_emis_W$upr <- Energy_emis_W$upr * Gg_to_Gt
-
-#east Africa
-colnames(lwr_E) <- c("Energy Source", "Scenario", "lwr")
-colnames(upr_E) <- c("Energy Source", "Scenario", "upr")
-lwr_E$`Energy Source` <- trimws(upr_E$`Energy Source`)
-upr_E$`Energy Source` <- trimws(lwr_E$`Energy Source`)
-lwr_E$Scenario <- str_replace(lwr_E$Scenario , "High_alt", "High")
-upr_E$Scenario <- str_replace(upr_E$Scenario , "High_alt", "High")
-Energy_emis_E <- right_join(Energy_emis_E, lwr_E, by = c("Energy Source", "Scenario"))
-Energy_emis_E <- right_join(Energy_emis_E, upr_E, by = c("Energy Source", "Scenario"))
-
-#Multiply lower and upper 95% by cropland 
-Energy_emis_E$cropland[Energy_emis_E$Scenario == "Baseline"] <- area_b$harv_area[area_b$region == "East"]
-Energy_emis_E$cropland[Energy_emis_E$Scenario == "Projected"] <-  area_p$harv_area[area_p$region == "East"]
-Energy_emis_E$cropland[Energy_emis_E$Scenario == "High"] <-  area_h_alt$harv_area[area_h_alt$region == "East"]
-
-#Converts upper and lower estimates are in Gigagrams or tons (manufacturing pesticides/fertilizers is in tons)
-Energy_emis_E$lwr <- Energy_emis_E$lwr * Energy_emis_E$cropland  
-Energy_emis_E$upr <- Energy_emis_E$upr * Energy_emis_E$cropland 
-
-#convert upper and lower estimates to gigagrams for manufacturing emissions
-Energy_emis_E$lwr[Energy_emis_E$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_E$lwr[Energy_emis_E$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg
-Energy_emis_E$lwr[Energy_emis_E$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_E$lwr[Energy_emis_E$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg #Did not multiply by pest_ef 
-Energy_emis_E$upr[Energy_emis_E$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_E$upr[Energy_emis_E$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg
-Energy_emis_E$upr[Energy_emis_E$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_E$upr[Energy_emis_E$`Energy Source` == "Manufacturing Pesticides"] * pest_ef *  tons_to_Gg
-
-#Convert all lower and upper estimates to Gigatons to match the units of the fitted values
-Energy_emis_E$lwr <- Energy_emis_E$lwr * Gg_to_Gt
-Energy_emis_E$upr <- Energy_emis_E$upr * Gg_to_Gt
-
-#Central Africa
-colnames(lwr_C) <- c("Energy Source", "Scenario", "lwr")
-colnames(upr_C) <- c("Energy Source", "Scenario", "upr")
-lwr_C$`Energy Source` <- trimws(lwr_C$`Energy Source`)
-upr_C$`Energy Source` <- trimws(lwr_C$`Energy Source`)
-lwr_C$Scenario <- str_replace(lwr_C$Scenario , "High_alt", "High")
-upr_C$Scenario <- str_replace(upr_C$Scenario , "High_alt", "High")
-Energy_emis_C <- right_join(Energy_emis_C, lwr_C, by = c("Energy Source", "Scenario"))
-Energy_emis_C <- right_join(Energy_emis_C, upr_C, by = c("Energy Source", "Scenario"))
-
-Energy_emis_C$cropland[Energy_emis_C$Scenario == "Baseline"] <- area_b$harv_area[area_b$region == "Central"]
-Energy_emis_C$cropland[Energy_emis_C$Scenario == "Projected"] <-  area_p$harv_area[area_p$region == "Central"]
-Energy_emis_C$cropland[Energy_emis_C$Scenario == "High"] <-  area_h_alt$harv_area[area_h_alt$region == "Central"]
-#Converts upper and lower estimates are in Gigagrams or tons (manufacturing pesticides/fertilizers is in tons)
-Energy_emis_C$lwr <- Energy_emis_C$lwr * Energy_emis_C$cropland  
-Energy_emis_C$upr <- Energy_emis_C$upr * Energy_emis_C$cropland 
-
-#convert upper and lower estimates to gigagrams for manufacturing emissions
-Energy_emis_C$lwr[Energy_emis_C$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_C$lwr[Energy_emis_C$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg 
-Energy_emis_C$lwr[Energy_emis_C$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_C$lwr[Energy_emis_C$`Energy Source` == "Manufacturing Pesticides"] * pest_ef * tons_to_Gg #Did not multiply by pest_ef 
-Energy_emis_C$upr[Energy_emis_C$`Energy Source` == "Manufacturing Fertilizers"] <- Energy_emis_C$upr[Energy_emis_C$`Energy Source` == "Manufacturing Fertilizers"] * fert_ef * kg_to_Gg
-Energy_emis_C$upr[Energy_emis_C$`Energy Source` == "Manufacturing Pesticides"] <- Energy_emis_C$upr[Energy_emis_C$`Energy Source` == "Manufacturing Pesticides"] * pest_ef *  tons_to_Gg
-
-#Convert all lower and upper estimates to Gigatons to match the units of the fitted values
-Energy_emis_C$lwr <- Energy_emis_C$lwr * Gg_to_Gt
-Energy_emis_C$upr <- Energy_emis_C$upr * Gg_to_Gt
-
-#Calculate lwr and upr error bounds for Africa
-# Energy_emis_E$Scenario <- as.matrix(unlist(Energy_emis_E$Scenario))
-# Energy_emis_E$Scenario[is.na(Energy_emis_E$Scenario)] <- "High"
-Energy_emis_Afr$MoE <- (Energy_emis_C$Value - Energy_emis_C$lwr)^2 + (Energy_emis_N$Value - Energy_emis_N$lwr)^2 +  (Energy_emis_S$Value - Energy_emis_S$lwr)^2 +  (Energy_emis_W$Value - Energy_emis_W$lwr)^2
-                                                                                                                        
-Energy_emis_Afr$sqrt_MoE <- sqrt(Energy_emis_Afr$MoE)
-Energy_emis_Afr$upr <- Energy_emis_Afr$Value + Energy_emis_Afr$sqrt_MoE
-Energy_emis_Afr$lwr <- Energy_emis_Afr$Value - Energy_emis_Afr$sqrt_MoE
-
-#rename inputs
-
-#syn n application
-Energy_emis_E$`Energy Source` <- str_replace(Energy_emis_E$`Energy Source` , "Synthetic N", "Synthetic N Application")
-Energy_emis_W$`Energy Source` <- str_replace(Energy_emis_W$`Energy Source` , "Synthetic N", "Synthetic N Application")
-Energy_emis_S$`Energy Source` <- str_replace(Energy_emis_S$`Energy Source` , "Synthetic N", "Synthetic N Application")
-Energy_emis_N$`Energy Source` <- str_replace(Energy_emis_N$`Energy Source` , "Synthetic N", "Synthetic N Application")
-Energy_emis_C$`Energy Source` <- str_replace(Energy_emis_C$`Energy Source` , "Synthetic N", "Synthetic N Application")
-Energy_emis_Afr$`Energy Source` <- str_replace(Energy_emis_Afr$`Energy Source` , "Synthetic N", "Synthetic N Application")
-
-#fert manufacturing
-Energy_emis_E$`Energy Source` <- str_replace(Energy_emis_E$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-Energy_emis_W$`Energy Source` <- str_replace(Energy_emis_W$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-Energy_emis_S$`Energy Source` <- str_replace(Energy_emis_S$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-Energy_emis_N$`Energy Source` <- str_replace(Energy_emis_N$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-Energy_emis_C$`Energy Source` <- str_replace(Energy_emis_C$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-Energy_emis_Afr$`Energy Source` <- str_replace(Energy_emis_Afr$`Energy Source` , "Manufacturing Fertilizers", "Manufacturing Synthetic N Fertilizer")
-
-#machinery
-Energy_emis_E$`Energy Source` <- str_replace(Energy_emis_E$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-Energy_emis_W$`Energy Source` <- str_replace(Energy_emis_W$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-Energy_emis_S$`Energy Source` <- str_replace(Energy_emis_S$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-Energy_emis_N$`Energy Source` <- str_replace(Energy_emis_N$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-Energy_emis_C$`Energy Source` <- str_replace(Energy_emis_C$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-Energy_emis_Afr$`Energy Source` <- str_replace(Energy_emis_Afr$`Energy Source` , "Embodied Energy in Machinery", "Manufacturing Machinery")
-
-#change y-axis to megatons and upper and lower error bars
-Gt_Mt <- 1000
-Energy_emis_E$Value <- Energy_emis_E$Value * Gt_Mt
-Energy_emis_W$Value <- Energy_emis_W$Value * Gt_Mt
-Energy_emis_S$Value <- Energy_emis_S$Value * Gt_Mt
-Energy_emis_C$Value <- Energy_emis_C$Value * Gt_Mt
-Energy_emis_N$Value <- Energy_emis_N$Value * Gt_Mt
-Energy_emis_Afr$Value <- Energy_emis_Afr$Value * Gt_Mt
-
-#lwr
-Energy_emis_E$lwr <- Energy_emis_E$lwr * Gt_Mt
-Energy_emis_W$lwr <- Energy_emis_W$lwr * Gt_Mt
-Energy_emis_S$lwr <- Energy_emis_S$lwr * Gt_Mt
-Energy_emis_C$lwr <- Energy_emis_C$lwr * Gt_Mt
-Energy_emis_N$lwr <- Energy_emis_N$lwr * Gt_Mt
-Energy_emis_Afr$lwr <- Energy_emis_Afr$lwr * Gt_Mt
-
-#upr
-Energy_emis_E$upr <- Energy_emis_E$upr * Gt_Mt
-Energy_emis_W$upr <- Energy_emis_W$upr * Gt_Mt
-Energy_emis_S$upr <- Energy_emis_S$upr * Gt_Mt
-Energy_emis_C$upr <- Energy_emis_C$upr * Gt_Mt
-Energy_emis_N$upr <- Energy_emis_N$upr * Gt_Mt
-Energy_emis_Afr$upr <- Energy_emis_Afr$upr * Gt_Mt
-
-#Energy graphs by region
-#Energy_E_high <- Energy_emis_E[Energy_emis_E$Scenario == "High_alt",] #Use High_alt as High
-#Energy_emis_E<- anti_join(Energy_emis_E, Energy_E_high)
-Energy_emis_E$Scenario <- factor(Energy_emis_E$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_E <- ggplot(Energy_emis_E, aes(fill = `Energy Source` , y = Value, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("East"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2 eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin = lwr, ymax= upr), width=.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
-Energy_E <- Energy_E  +  scale_fill_manual(values=bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_E.png", plot = Energy_E)  
-
-#West Africa
-Energy_emis_W$Scenario <- factor(Energy_emis_W$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_W <- ggplot(Energy_emis_W, aes(fill = `Energy Source` , y = Value, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("West"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=0.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))  + theme_bti()
-Energy_W <- Energy_W  +  scale_fill_manual(values=bti_colors)
-ggsave(filename ="~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_W.png", plot = Energy_W)  
-
-#Central Africa
-Energy_emis_C$Scenario <- factor(Energy_emis_C$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_C <- ggplot(Energy_emis_C, aes(fill = `Energy Source` , y = Value, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Central"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
-Energy_C <- Energy_C  +  scale_fill_manual(values=bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_C.png", plot = Energy_C )  
-
-#Southern Africa
-Energy_emis_S$Scenario <- factor(Energy_emis_S$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_S <- ggplot(Energy_emis_S, aes(fill = `Energy Source` , y = Value, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Southern"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
-Energy_S <- Energy_S  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_S.png", plot = Energy_S, width = , height = )  
-
-
-#North Africa
-Energy_emis_N$Scenario <- factor(Energy_emis_N$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_N <- ggplot(Energy_emis_N, aes(fill = `Energy Source` , y = Value, x = Scenario))  +  geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("North")))  + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) +  scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
-Energy_N <- Energy_N  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_N.png", plot = Energy_N)  
-
-#Africa
-Energy_emis_Afr$Scenario <- factor(Energy_emis_Afr$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_Afr <- ggplot(Energy_emis_Afr, aes(fill = `Energy Source` , y = Value, x = Scenario))  +  geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Africa")))  + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Inputs") + geom_errorbar(aes(ymin= lwr , ymax= upr), width=.2,
-                 position=position_dodge(.9))  +  scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti()
-Energy_Afr <- Energy_Afr  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_N.png", plot = Energy_Afr) 
-
-
-#total Energy graphs with all regions included except SSA (no error bars)
-Energy_emis_all <- Energy_emis %>% group_by(Scenario, Region) %>% summarize(sum(Value)) 
-Energy_emis_Afr_all <- Energy_emis_all[Energy_emis_all$Region == "Africa",]
-Energy_emis_all <- anti_join(Energy_emis_all,Energy_emis_Afr_all )
-Energy_emis_all$Scenario <- factor(Energy_emis_all$Scenario ,levels = c("Baseline", "Projected", "High"))
-
-Energy_emis_all_reg <- ggplot(Energy_emis_all, aes(fill = Region , y = `sum(Value)`, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("Energy Input Use Emissions by Region"))) + xlab("Scenario") + ylab("GHG Emissions (Gt CO2eq)") + labs(fill = "Region") + theme_bti()
-Energy_emis_all_reg <- Energy_emis_all_reg +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/Energy_all_reg.png", plot = Energy_emis_all_reg, width = , height = )
-
-#Create a figure that has all of the energy source by region grafs displayed
-Energy_N <- Energy_N + ggtitle("") + ylab("") + xlab("") +  theme_bti() 
-Energy_S <- Energy_S + ggtitle("") + ylab("") + xlab("") + theme_bti() 
-Energy_W <- Energy_W + ggtitle("") + ylab("") + xlab("") +  theme_bti() 
-Energy_E <- Energy_E + ggtitle("") + ylab("") + xlab("") + theme_bti()  
-Energy_C <- Energy_C + ggtitle("") + ylab("") + xlab("") +  theme_bti() 
-Energy_Afr <-  Energy_Afr + ggtitle("") + ylab("") + xlab("") + theme_bti()  
-
-library(ggpubr)
-energy_region_grafs <- ggarrange(Energy_N, Energy_S, Energy_W, Energy_E, Energy_C, Energy_Afr, labels = c("North", "Southern","West","East", "Central", "Africa"),font.label = list(size = 12, face = "plain", color = "black", family = NULL), common.legend = TRUE, legend = "bottom")
-
-
-# Annotate the figure by adding a common labels
-energy_region_grafs <- annotate_figure(energy_region_grafs,
-                top = text_grob("Emissions from Input Use by Region", color = "black" , size = 12),
-                left = text_grob("GHG Emissions (Mt CO2eq)", color = "black", rot = 90))
-                
-                #fig.lab = "Figure 1", fig.lab.face = "bold")
-ggsave(filename = "results/graphs/supplementary/s2_all_input_emiss_by_region.png", plot = energy_region_grafs, width = , height = )
-
-
-#Total Energy emissions error bars, and with LUC emis for each region 
-
-#add in lwr and upr bounds for Energy emissions
-Energy_emis_E$MoE <- Energy_emis_E$Value - Energy_emis_E$lwr
-Energy_emis_C$MoE <- Energy_emis_C$Value - Energy_emis_C$lwr
-Energy_emis_S$MoE <- Energy_emis_S$Value - Energy_emis_S$lwr
-Energy_emis_N$MoE <- Energy_emis_N$Value - Energy_emis_N$lwr
-Energy_emis_W$MoE <- Energy_emis_W$Value - Energy_emis_W$lwr
-
-Energy_emis_E$MoE2 <- Energy_emis_E$MoE^2
-Energy_emis_C$MoE2 <- Energy_emis_C$MoE^2
-Energy_emis_W$MoE2 <- Energy_emis_W$MoE^2
-Energy_emis_N$MoE2 <- Energy_emis_N$MoE^2
-Energy_emis_W$MoE2 <- Energy_emis_W$MoE^2
-
-# En <- as.data.frame(matrix(0, ncol = ncol(tot_E) + 1, nrow = nrow(tot_E)))
-# En[1,] <- tot_E %>% filter(Region == "East", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[2,] <- tot_E %>% filter(Region == "East", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[3,] <- tot_E %>% filter(Region == "East", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))
-# En[4,] <- tot_E %>% filter(Region == "West", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[5,] <- tot_E %>% filter(Region == "West", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[6,] <- tot_E %>% filter(Region == "West", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))
-# En[7,] <- tot_E %>% filter(Region == "Southern", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[8,] <- tot_E %>% filter(Region == "Southern", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[9,] <- tot_E %>% filter(Region == "Southern", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))
-# En[10,] <- tot_E %>% filter(Region == "Central", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[11,] <- tot_E %>% filter(Region == "Central", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[12,] <- tot_E %>% filter(Region == "Central", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))
-# En[13,] <- tot_E %>% filter(Region == "North", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[14,] <- tot_E %>% filter(Region == "North", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[15,] <- tot_E %>% filter(Region == "North", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))
-# En[16,] <- tot_E %>% filter(Region == "Africa", Scenario == "Baseline") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Baseline"])))
-# En[17,] <- tot_E %>% filter(Region == "Africa", Scenario == "Projected") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "Projected"])))
-# En[18,] <- tot_E %>% filter(Region == "Africa", Scenario == "High") %>% mutate( SS = with(Energy_emis_E,sum(MoE2[Scenario == "High"])))                          
-# colnames(En) <- c("Scenario", "Region", "Energy", "SummedSqs")
-# En$SS_sqrt <- sqrt(En$SummedSqs)
-# En$upr <- En$Energy + En$SS_sqrt
-# En$lwr <- En$Energy - En$SS_sqrt
-# En$Energy <- En$Energy * Gg_to_Gt * Gt_Mt
-# En$upr <- En$upr  * Gg_to_Gt * Gt_Mt
-# En$lwr <- En$lwr  * Gg_to_Gt * Gt_Mt
-# En$Scenario <- ifelse(En$Scenario == 1, "Baseline", ifelse(En$Scenario == 3, "Projected", ifelse(En$Scenario == 2, "High", NA)))
-#
-#convert to megatons
-tot_E$Energy <- tot_E$Energy * Gg_to_Gt * Gt_Mt
-#new lwr and upr bounds for tot_e
-En2 <- as.data.frame(matrix(0, ncol = ncol(tot_E) + 1, nrow = nrow(tot_E)))
-En2[1,] <-  tot_E %>% filter(Region == "East", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_E,sum(lwr[Scenario == "Baseline"])))
-En2[2,] <- tot_E %>% filter(Region == "East", Scenario == "Projected") %>% mutate( lwr_new = with(Energy_emis_E,sum(lwr[Scenario == "Projected"])))
-En2[3,] <- tot_E %>% filter(Region == "East", Scenario == "High") %>% mutate(lwr_new = with(Energy_emis_E,sum(lwr[Scenario == "High"])))
-En2[4,] <- tot_E %>% filter(Region == "West", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_W,sum(lwr[Scenario == "Baseline"])))
-En2[5,] <- tot_E %>% filter(Region == "West", Scenario == "Projected") %>% mutate(lwr_new = with(Energy_emis_W,sum(lwr[Scenario == "Projected"])))
-En2[6,] <- tot_E %>% filter(Region == "West", Scenario == "High") %>% mutate(lwr_new = with(Energy_emis_W,sum(lwr[Scenario == "High"])))
-En2[7,] <- tot_E %>% filter(Region == "Southern", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_S,sum(lwr[Scenario == "Baseline"])))
-En2[8,] <- tot_E %>% filter(Region == "Southern", Scenario == "Projected") %>% mutate(lwr_new = with(Energy_emis_S,sum(lwr[Scenario == "Projected"])))
-En2[9,] <- tot_E %>% filter(Region == "Southern", Scenario == "High") %>% mutate(lwr_new = with(Energy_emis_S,sum(lwr[Scenario == "High"])))
-En2[10,] <- tot_E %>% filter(Region == "Central", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_C,sum(lwr[Scenario == "Baseline"])))
-En2[11,] <- tot_E %>% filter(Region == "Central", Scenario == "Projected") %>% mutate(lwr_new = with(Energy_emis_C,sum(lwr[Scenario == "Projected"])))
-En2[12,] <- tot_E %>% filter(Region == "Central", Scenario == "High") %>% mutate(lwr_new = with(Energy_emis_C,sum(lwr[Scenario == "High"])))
-En2[13,] <- tot_E %>% filter(Region == "North", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_N,sum(lwr[Scenario == "Baseline"])))
-En2[14,] <- tot_E %>% filter(Region == "North", Scenario == "Projected") %>% mutate(lwr_new = with(Energy_emis_N,sum(lwr[Scenario == "Projected"])))
-En2[15,] <- tot_E %>% filter(Region == "North", Scenario == "High") %>% mutate( lwr_new = with(Energy_emis_N,sum(lwr[Scenario == "High"])))
-En2[16,] <- tot_E %>% filter(Region == "Africa", Scenario == "Baseline") %>% mutate(lwr_new = with(Energy_emis_Afr,sum(lwr[Scenario == "Baseline"])))
-En2[17,] <- tot_E %>% filter(Region == "Africa", Scenario == "Projected") %>% mutate(lwr_new = with(Energy_emis_Afr,sum(lwr[Scenario == "Projected"])))
-En2[18,] <- tot_E %>% filter(Region == "Africa", Scenario == "High") %>% mutate(lwr_new = with(Energy_emis_Afr,sum(lwr[Scenario == "High"])))
-colnames(En2) <- c("Scenario", "Region", "value", "upr", "lwr","variable" , "lwr_new")
-En2$Scenario <- ifelse(En2$Scenario == 1, "Baseline", ifelse(En2$Scenario == 3, "Projected", ifelse(En2$Scenario == 2, "High", NA)))
-
- #merge lwr and upr bounds with tot_E data
- tot_E <- merge(tot_E, En)
- tot_E$SummedSqs <- NULL
-#tot_E$SS_sqrt <- NULL
-tot_E$variable <- "Energy"
- colnames(tot_E) <- c("Scenario" , "Region"  ,"value" ,  "upr" , "lwr" ,  "variable")
- LUC_Afr_regions$variable <- "LUC"
- colnames(LUC_Afr_regions) <- c("Region" , "Scenario"  ,"value", "variable")
- LUC_Afr_regions$value <- (LUC_Afr_regions$value * kg_to_Gg *Gg_to_Gt)/380
- GHG <- full_join(tot_E, LUC_Afr_regions)
- GHG[GHG$upr == 0] <- NA
- 
-tot_E$Scenario <- as.character(unlist(tot_E$Scenario))
-upr_new <- as.data.frame(matrix(0, nrow = nrow(tot_E), ncol = ncol(tot_E) + 1))
-upr_new[1,] <- tot_E %>% filter(Region == "East", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_E,sum(upr[Scenario == "Baseline"])))
-upr_new[2,] <- tot_E %>% filter(Region == "East", Scenario == "Projected") %>% mutate( upr_new = with(Energy_emis_E,sum(upr[Scenario == "Projected"])))
-upr_new[3,] <- tot_E %>% filter(Region == "East", Scenario == "High") %>% mutate(upr_new = with(Energy_emis_E,sum(upr[Scenario == "High"])))
-upr_new[4,] <- tot_E %>% filter(Region == "West", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_W,sum(upr[Scenario == "Baseline"])))
-upr_new[5,] <- tot_E %>% filter(Region == "West", Scenario == "Projected") %>% mutate(upr_new = with(Energy_emis_W,sum(upr[Scenario == "Projected"])))
-upr_new[6,] <- tot_E %>% filter(Region == "West", Scenario == "High") %>% mutate(upr_new = with(Energy_emis_W,sum(upr[Scenario == "High"])))
-upr_new[7,] <- tot_E %>% filter(Region == "Southern", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_S,sum(upr[Scenario == "Baseline"])))
-upr_new[8,] <- tot_E %>% filter(Region == "Southern", Scenario == "Projected") %>% mutate(upr_new = with(Energy_emis_S,sum(upr[Scenario == "Projected"])))
-upr_new[9,] <- tot_E %>% filter(Region == "Southern", Scenario == "High") %>% mutate(upr_new = with(Energy_emis_S,sum(upr[Scenario == "High"])))
-upr_new[10,] <- tot_E %>% filter(Region == "Central", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_C,sum(upr[Scenario == "Baseline"])))
-upr_new[11,] <- tot_E %>% filter(Region == "Central", Scenario == "Projected") %>% mutate(upr_new = with(Energy_emis_C,sum(upr[Scenario == "Projected"])))
-upr_new[12,] <- tot_E %>% filter(Region == "Central", Scenario == "High") %>% mutate(upr_new = with(Energy_emis_C,sum(upr[Scenario == "High"])))
-upr_new[13,] <- tot_E %>% filter(Region == "North", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_N,sum(upr[Scenario == "Baseline"])))
-upr_new[14,] <- tot_E %>% filter(Region == "North", Scenario == "Projected") %>% mutate(upr_new = with(Energy_emis_N,sum(upr[Scenario == "Projected"])))
-upr_new[15,] <- tot_E %>% filter(Region == "North", Scenario == "High") %>% mutate( upr_new = with(Energy_emis_N,sum(upr[Scenario == "High"])))
-upr_new[16,] <- tot_E %>% filter(Region == "Africa", Scenario == "Baseline") %>% mutate(upr_new = with(Energy_emis_Afr,sum(upr[Scenario == "Baseline"])))
-upr_new[17,] <- tot_E %>% filter(Region == "Africa", Scenario == "Projected") %>% mutate(upr_new = with(Energy_emis_Afr,sum(upr[Scenario == "Projected"])))
-upr_new[18,] <- tot_E %>% filter(Region == "Africa", Scenario == "High") %>% mutate(upr_new = with(Energy_emis_Afr,sum(upr[Scenario == "High"])))
-colnames(upr_new) <-  c("Scenario", "Region", "value", "upr", "lwr","variable" , "upr_new")
-En2 <- merge(En2, upr_new)
-tot_E <- merge(tot_E, En2)  
-LUC_Afr_regions$value  <- LUC_Afr_regions$value * Gt_Mt
-GHG <- full_join(tot_E, LUC_Afr_regions)
-
-#Energy_LUC_GHG <- Energy_LUC[Energy_LUC$variable == "GHG",] #exclude total GHG emissions, units are gigatons
-#Energy_LUC_GHG  <- anti_join(Energy_LUC , Energy_LUC_GHG )
-Energy_LUC_E <- filter(GHG, Region == "East")
-Energy_LUC_W <- filter(GHG, Region == "West")
-Energy_LUC_C <- filter(GHG, Region == "Central")
-Energy_LUC_S <- filter(GHG, Region == "Southern")
-Energy_LUC_N <- filter(GHG, Region == "North")
-Energy_LUC_Afr <- filter(GHG, Region == "Africa")
-Energy_LUC_Afr$variable <- str_replace(Energy_LUC_Afr$variable, "Energy", "Inputs")
-Energy_LUC_E$variable <- str_replace(Energy_LUC_E$variable, "Energy", "Inputs")
-Energy_LUC_W$variable <- str_replace(Energy_LUC_W$variable, "Energy", "Inputs")
-Energy_LUC_C$variable <- str_replace(Energy_LUC_C$variable, "Energy", "Inputs")
-Energy_LUC_S$variable <- str_replace(Energy_LUC_S$variable, "Energy", "Inputs")
-Energy_LUC_N$variable <- str_replace(Energy_LUC_N$variable, "Energy", "Inputs")
-
-#Graph Energy + LUC graphs
-#East
-Energy_LUC_E$Scenario <- factor(Energy_LUC_E$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_E_plot <- ggplot(Energy_LUC_E , aes(fill = variable , y = value , x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") + scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) +  geom_errorbar(aes(ymin= lwr_new , ymax= upr_new), width=.2, position=position_dodge(.9)) + theme_bti()
-Energy_LUC_E_plot <- Energy_LUC_E_plot  +  scale_fill_manual(values= bti_colors) 
-#West
-Energy_LUC_W$Scenario <- factor(Energy_LUC_W$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_W_plot <- ggplot(Energy_LUC_W , aes(fill = variable , y = value , x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") +  geom_errorbar(aes(ymin= Energy_LUC_W$lwr_new, ymax= Energy_LUC_W$upr_new), width=.2, position=position_dodge(.9))  + scale_x_discrete(labels= x.axis)  + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) + theme_bti() 
-Energy_LUC_W_plot <- Energy_LUC_W_plot  +  scale_fill_manual(values= bti_colors) 
-
-Energy_LUC_S$Scenario <- factor(Energy_LUC_S$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_S_plot <- ggplot(Energy_LUC_S , aes(fill = variable , y = value , x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") +  geom_errorbar(aes(ymin= lwr_new, ymax= upr_new), width= 0.2, position=position_dodge(0.9)) + scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) +  theme_bti() 
-Energy_LUC_S_plot <- Energy_LUC_S_plot  +  scale_fill_manual(values= bti_colors) 
-
-Energy_LUC_N$Scenario <- factor(Energy_LUC_N$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_N_plot <- ggplot(Energy_LUC_N, aes(fill = variable , y = value , x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") + geom_errorbar(aes(ymin= Energy_LUC_N$lwr_new, ymax= Energy_LUC_N$upr_new), width =0.2, position = position_dodge(0.9))  + scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) +  theme_bti()  
-Energy_LUC_N_plot <- Energy_LUC_N_plot  +  scale_fill_manual(values= bti_colors) 
-
-Energy_LUC_C$Scenario <- factor(Energy_LUC_C$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_C_plot <- ggplot(Energy_LUC_C , aes(fill = variable , y = value , x= Scenario)) + 
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") + geom_errorbar(aes(ymin= lwr_new, ymax= upr_new), width = 0.2, position = position_dodge(0.9))  + scale_x_discrete(labels= x.axis) + scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) +  theme_bti() 
-Energy_LUC_C_plot <- Energy_LUC_C_plot  +  scale_fill_manual(values= bti_colors) 
-
-#Africa
-Energy_LUC_Afr$lwr_new <- Energy_LUC_Afr$lwr_new  * Gt_Mt
-Energy_LUC_Afr$upr_new <- Energy_LUC_Afr$upr_new  * Gt_Mt
-Energy_LUC_Afr$Scenario <- factor(Energy_LUC_Afr$Scenario,levels = c("Baseline", "Projected", "High"))
-Energy_LUC_Afr_plot <- ggplot(Energy_LUC_Afr , aes(fill = variable , y = value , x= Scenario)) +
-    geom_bar(position="dodge", stat="identity") + xlab("") + ylab("") + labs(fill = "Emissions Type") + geom_errorbar(aes(ymin= lwr_new, ymax= upr_new), width = 0.2, position = position_dodge(0.9))   + scale_x_discrete(labels= x.axis) +scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1))) +  theme_bti() 
-Energy_LUC_Afr_plot <- Energy_LUC_Afr_plot  +  scale_fill_manual(values= bti_colors) 
-
-energy_LUC_grafs2 <- ggarrange(Energy_LUC_N_plot, Energy_LUC_S_plot, Energy_LUC_W_plot, Energy_LUC_E_plot, Energy_LUC_C_plot,Energy_LUC_Afr_plot, labels = c("North", "Southern","West","East", "Central", "Africa"), hjust = 0,vjust = 0.4, font.label = list(size = 10, face = "plain", color = "black", family = NULL), common.legend = TRUE, legend = "bottom")
-
-
-# Annotate the figure by adding a common labels
-energy_LUC_grafs2 <- annotate_figure(energy_LUC_grafs2,
-                top = text_grob("", color = "black" , size = 10),
-                left = text_grob("GHG Emissions (Mt CO2eq)", color = "black", rot = 90))
-                
-                #fig.lab = "Figure 1", fig.lab.face = "bold")
-ggsave(filename = "~/Google Drive/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/energy_LUC_grafs.png", plot = energy_LUC_grafs2, width = , height = )
-
-write.csv(Energy_emis_C, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_C.csv")
-write.csv(Energy_emis_E, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_E.csv")
-write.csv(Energy_emis_S, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_S.csv")
-write.csv(Energy_emis_W, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_W.csv")
-write.csv(Energy_emis_N, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_N.csv")
-write.csv(Energy_emis_Afr, "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/Energy-Ag_tbls/Energy_emis_Afr.csv")
-```
-
-
-```{r LUC emis graph, all emis sources graph }
-#plot results  
-LUC_emis <- GHG[, c(1:3)]
-x.axis <- c("Baseline", "Projected", "High")
-
-LUC_emis_Afr <- LUC_emis[LUC_emis$Region == "Africa",] #have separate charts for SSA data to compare to region breakdown
-LUC_emis <- anti_join(LUC_emis, LUC_emis_Afr)
-LUC_emis$Scenario <- str_replace(LUC_emis$Scenario, "High_alt","High")
-LUC_emis$Scenario <- factor(LUC_emis$Scenario,levels = c("Baseline", "Projected", "High"))
-
-LUC_regions <- ggplot(LUC_emis , aes(fill = Region , y = LUC , x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity" ) + ggtitle(expression(paste("LUC emissions by scenario and region"))) + xlab("Scenario") + ylab("LUC Emissions (Gt CO2 eq)") + labs(fill = "Region")  +  scale_x_discrete(labels= x.axis) + theme_bti()
-
-LUC_regions  <- LUC_regions  +  scale_fill_manual(values= bti_colors)
-ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/LUC_regions_grouped", plot = LUC_regions , width = , height = )
-
-#LUC stacked chart 
-LUC_stacked <- ggplot(LUC_Afr_regions , aes(fill = Region , y = `LUC emissions(Gt)`, x = Scenario)) + 
-    geom_bar(position="fill", stat="identity" ) + ggtitle(expression(paste("% LUC emissions by region for each scenario"))) + xlab("Scenario") + ylab("% LUC emissions") + labs(fill = "Region")  +  scale_x_discrete(labels= x.axis) + theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="dotted"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="dotted"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=13, face="bold"))
-
-LUC_stacked <- LUC_stacked +  scale_fill_manual(values=wes_palette(n=5, name="Darjeeling1"))
-ggsave(filename = "~/Google Drive File Stream/My Drive/Food & Farming/Energy in ag/results/graphs/New Graphs/LUC_stacked_reg", plot = LUC_stacked , width = , height = )
-
-
-#LUC_SSA chart
-LUC_SSA$Scenario <- factor(LUC_SSA$Scenario,levels = c("Baseline", "Projected", "High_alt"))
-LUC_SSA <- as.data.frame(na.omit(LUC_Afr_regions))
-LUC_SSA <- ggplot(LUC_Afr_regions , aes(y = LUC, x = Scenario)) + 
-    geom_bar(position="dodge", stat="identity", fill = "#0DC3A8") + ggtitle(expression(paste("LUC emissions by scenario in Sub-Saharan Africa"))) + xlab("Scenario") + ylab("LUC Emissions (Gt CO2 eq)")  +  scale_x_discrete(labels= x.axis) + theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="dotted"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="dotted"),axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=13, face="bold"))
-
-ggsave(filename = "~/Desktop/Grafs_energyag/LUC_SSA.png", plot = LUC_SSA , width = , height = )
-
-#Stacked bar chart
-bp <- ggplot(all_emis_melted, aes(fill= variable, y= LUC, x=Scenario)) + 
-    geom_bar(position="stack", stat="identity") + ggtitle(expression(paste("Emissions by Scenario"))) + xlab("Scenario") + ylab("GHG Emissions (CO2eq)") + labs(fill = "Categories") + theme(axis.title.x = element_text(color="black",size=12),axis.title.y = element_text(color="black", size=12) ,panel.background = element_rect(fill = NA),
-       panel.grid.major.y = element_line(colour="grey68",linetype="dotted"),
-       panel.grid.major.x = element_line(colour="grey68",linetype="dotted"), axis.ticks.y = element_blank(),axis.ticks.x=element_blank(),
-       plot.title = element_text(size=13, face="bold"))
-
-positions <- c("Baseline Yield", "Projected Yield", "High Yield")
-bp + scale_x_discrete(limits = positions) 
-bp
-
-colnames(all_emis) <- c("LUC", "Total Energy + LUC emissions", "Synthetic N emissions", "On Farm Fuel Emissions", "Manufacturing Pesticides Emissions", "Manufacturing Nitrogen Emissions", "Manufacturing Nitrogen Emissions 2", "Energy Embodied in Machinery Emissions", "Total Energy Emissions", "Scenario")
-rownames(all_emis) <- c("current", "projected", "high")
-write_csv(all_emis, path = "~/Google Drive/Energy and GHG Analysis (2019)/energy_ag_analysis/Results/LUC_Energy_Emissions.csv")
-```
-
-
-```{r OLS Estimators table and Predictions Estimator table}
-m.ols_coef <- rbind(m.ols$coefficients[1],m.ols$coefficients[2])
-p.ols_coef <- rbind(p.ols$coefficients[1],p.ols$coefficients[2])
-fert_use.coef  <- rbind(fert_use.ols$coefficients[1],fert_use.ols$coefficients[2])
-syn_n.coef <- rbind(syn_n.ols$coefficients[1],syn_n.ols$coefficients[2])
-fuel.coef <- rbind(fuel.ols$coefficients[1], fuel.ols$coefficients[2])
-energy_coefs <- cbind(m.ols_coef, p.ols_coef, syn_n.coef, fert_use.coef, fuel.coef)
-colnames(energy_coefs) <- c("machinery energy emissions", "manufacturing pesticides emissions", "synthetic N fertilizer emissions", "manufacturing fertilizers emissions", "on-farm fuel energy emissions")
-energy_coefs[2,1] <- exp(energy_coefs[2,1])
-energy_coefs[2,2] <- exp(energy_coefs[2,2])
-energy_coefs[2,3] <- exp(energy_coefs[2,3])
-energy_coefs[2,4] <- exp(energy_coefs[2,4])
-energy_coefs[2,5] <- exp(energy_coefs[2,5])
-
-rownames(energy_coefs) <- c("Intercept", "Yield")
-energy_coefs <- as.data.frame(energy_coefs)
-write_csv(energy_coefs, "~/Google Drive/Energy and GHG Analysis (2019)/energy_ag_analysis/Results/energy_coefs.csv")
-
-write_csv(predict_tbl, path = "~/Google Drive/Energy and GHG Analysis (2019)/energy_ag_analysis/Results/predict_tbl.csv")
-
-#Error Bars
-fuel.ols <- as.data.frame(fuel.ols$coefficients)
-write.csv(fuel.ols, "~/Desktop/Energy-Ag_tbls/Fuel_coeffs.csv")
-p.coeffs <- as.data.frame(p.ols$coefficients)
-p.coeffs$coeffs <- rownames(p.coeffs)
-rownames(p.coeffs) <- NULL
-write.csv(p.coeffs, "~/Desktop/Energy-Ag_tbls/p_coeffs.csv")
-m.coeffs <- as.data.frame(m.ols$coefficients)
-m.coeffs$coeffs <- rownames(m.coeffs)
-rownames(p.coeffs) <- NULL
-write.csv(m.coeffs, "~/Desktop/Energy-Ag_tbls/m_coeffs.csv")
-
-fert_use.coeffs <- as.data.frame(fert_use.ols$coefficients)
-fert_use.coeffs$coeffs <- rownames(fert_use.coeffs)
-rownames(fert_use.coeffs) <- NULL
-write.csv(fert_use.coeffs, "~/Desktop/Energy-Ag_tbls/fert_use_coeffs.csv")
-
-syn_n.coeffs <- as.data.frame(syn_n.ols$coefficients)
-syn_n.coeffs$coeffs <- rownames(syn_n.coeffs)
-rownames(syn_n.coeffs) <- NULL
-write.csv(syn_n.coeffs, "~/Desktop/Energy-Ag_tbls/syn_n_coeffs.csv")
-```
-
-```{r Export table of predicted values }
-#"Manufacturing Pesticides", "On-Farm Fuel","Synthetic N", "Manufacturing Fertilizers", "Embodied Energy in Machinery")
-```
-
-```{r Additional Data Viz}
-
-```
-
-```{r Calculations comparing scenarios}
-pct_c_p <- (Energy_emissions$total[2] -  Energy_emissions$total[1])/Energy_emissions$total[1]
-pct_c_h <- (Energy_emissions$total[3] -  Energy_emissions$total[1])/Energy_emissions$total[1]
-pct_yld_p <- (unlist(Yield_scenarios$projected[1]) -  unlist(Yield_scenarios$current[1])/unlist(Yield_scenarios$current[1])) 
-(all_emis$`Total Energy + LUC emissions`[2] - all_emis$LUC[2])/all_emis$LUC[2]
 ```
