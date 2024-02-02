@@ -11,6 +11,7 @@ f <- paste0("int_data/qgis_output/", list.files(path = "int_data/qgis_output/", 
 df.list <- lapply(f,readxl::read_excel)
 f <- sub("int_data/qgis_output/", "", f)
 names(df.list) <- sub("\\..*", "", f)
+df.list$mill$NE_ID <- as.character(df.list$mill$NE_ID) #fix NE_ID column in mill data to match with NE_ID column in other dataframes for binding. difference is due to qgis proces
 carbon <- bind_rows(df.list, .id = "id")
 carbon <- select(carbon, id, lucsum, soilsum, vegsum , ADMIN, ADM0_A3, NAME, NAME_LONG, BRK_NAME)
 ```
@@ -54,8 +55,7 @@ carbon <- carbon %>%
   mutate(soilH = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_h),
          soilS = ((soilsum/lucsum) * c_to_co2 * tons_to_kg * pct_soil_loss_s),
          veg = (((vegsum/lucsum)-cstock) * c_to_co2 * tons_to_kg) #calculate avg tC/ha under native veg, then subtract vegetative carbon stocks
-         ) %>%
-  select(-c(lucsum, soilsum, vegsum, cstock))
+         )
 
 #replace 0's and NAs in carbon dataframe with the corresponding values from the afr_avg_carbon dataframe
 carbon[carbon == 0] <- NA #set 0's to NA
