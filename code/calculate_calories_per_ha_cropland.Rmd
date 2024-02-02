@@ -1,10 +1,10 @@
 ---
 title: "Calculate Calories Produced by Country and year"
-output: html_notebook
+output: html_document
 author: "Dan Rejto"
 date: "Apr 13, 23"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 ```{r initialize}
@@ -12,13 +12,13 @@ library(tidyverse)
 ```
 
 ```{r Load data}
-prod <- read_csv("../raw_data/faostat/production_all_crops.csv") %>% select(country = Area, year = Year, crop = Item, production)
+prod <- read_csv("raw_data/faostat/production_all_crops.csv") %>% select(country = Area, year = Year, crop = Item, production)
 #units for production are in tonnes
 
-cal_conversions <- read_csv("../raw_data/cal_per_tonne_by_crop.csv")
+cal_conversions <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
 #units are kilocalorie per tonne. source: FAO
 
-cropland <- read_csv("../raw_data/faostat/cropland.csv") %>% 
+cropland <- read_csv("raw_data/faostat/cropland.csv") %>% 
   select(-Domain, -Element, -Item, cropland = Value, country = Area, year = Year) %>% 
   mutate(cropland = cropland * 1000) #original units for cropland are in 1000 ha. We convert to ha. Source: FAOSTAT
 ``` 
@@ -83,7 +83,7 @@ tot_prod <- prod %>%
 ```
 
 ```{r Save}
-write_csv(tot_prod, "../int_data/prod.cropland.csv")
-write_csv(as_tibble(unique(prod$crop)), "../results/crops_included_in_calorie_per_ha_calc.csv")
+write_csv(tot_prod, "int_data/prod.cropland.csv")
+write_csv(as_tibble(unique(prod$crop)), "results/supplementary/crops_included_in_calorie_per_ha_calc.csv")
 rm(list = ls())
 ```
