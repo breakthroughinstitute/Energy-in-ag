@@ -6,17 +6,7 @@ output: html_document
 ---
 #SETUP
 ```{r Load packages}
-library(zoo)
-library(sandwich)
-library(plm)
-library(lmtest)
-library(jtools) 
-library(ggstance)
-library(tidyverse)
-library(janitor)
-library(naniar)
-library(wesanderson)
-library(grid);library(sysfonts);library(showtext)
+library(tidyverse); library(naniar); library(janitor)
 ```
 
 ```{r Read in Data}
@@ -113,7 +103,7 @@ reg <- naniar::replace_with_na_all(data = reg, condition = ~.x == 0)
 # boxplot(reg$fert_emiss_ha)
 # ggplot(reg) + geom_density(aes(fert_emiss_ha))
 
-#remove countries with many substantial and unexplainable outlier values
+#remove countries with substantial and unexplained outlier values
 outlier_en_countries <- reg %>% filter(en_emiss_ha>=0.15) %>% distinct(country) %>% pull() 
 outlier_p_countries <- reg %>% filter(p_ha>=0.1) %>% distinct(country) %>% pull() 
 outlier_m_countries <- reg %>% filter(m_energy_ha>=1.0) %>% distinct(country) %>% pull() 
@@ -183,7 +173,6 @@ reg_all_countries <- bind_rows(reg_other_country, reg_C_aggregate, reg_E_aggrega
 ```
 
 ```{r Explore data and remove outliers}
-
 #OLS model includes country fixed effect to reduce bias
 
 reg_all_countries <- naniar::replace_with_na_all(data = reg_all_countries, condition = ~.x == 0) #Make sure all 0's are converted to NAs, lm function automatically removes data with NAs 
@@ -195,11 +184,11 @@ reg_all_countries <- naniar::replace_with_na_all(data = reg_all_countries, condi
 #   xlab = "yield",
 #   main = "Histogram of yield",
 #   breaks = sqrt(nrow(reg_all_countries))) # set number of bins
-# #Barbados, Kuwait, Belgium, Martinque occupy many of the highest values
-# #higher than ~2*10^7 is an outlier based on historgram and barplot
+# #Barbados, Kuwait, Belgium, Martinque occupy many of the highest values, over 20 mill. Ireland has some too, especially after ~2011. China, mainland; Germany; Netherlands, and several other ciountries have similarly high values above 18 or 19 million. Given the variety of countries and the unknown reason why these are so high, we leave them in. The results are negligibly different than if we omit values greater than 20 million.
+
 # sum(reg_all_countries$yield >= 20000000, na.rm=T) #32 entries
 # sum(reg_all_countries$yield >= 20000000, na.rm=T)/nrow(reg_all_countries) #~.5% of total entries
-filter_reg <- filter(reg_all_countries, reg_all_countries$yield < 20000000)
+filter_reg <- reg_all_countries #filter(reg_all_countries, reg_all_countries$yield < 20000000) can comment in to omit particularly high yield values
 write_csv(filter_reg %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/reg_dat_outliers_removed.csv")
 ```
 
@@ -240,24 +229,8 @@ fert_use_ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(
 m_energy_ols <- lm(filter_reg, formula = log(m_energy_ha) ~ log(yield) + factor(country))#Energy embodied in machinery OLS regression
 ```
 
-
-```{r Sanity Check on parameters - optional for running}
-#Check to see that that the model fitted values match the log(actual values) in the regression dataset, values should fall around 1:1 line
-
-# plot(x = log(na.omit(filter_reg$p_ha)), y = p_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of pesticide/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line
-# 
-# plot(x = log(na.omit(filter_reg$en_emiss_ha)), y = fuel_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of fuel/ha values")
-#  abline(b=1, a=0) #values fall around this 1:1 line
-# 
-# plot(x = log(na.omit(filter_reg$fert_emiss_ha)), y = syn_n_ols$fitted.values, xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN/ha values")
-# abline(b=1, a=0) #values fall around this 1:1 line
-# 
-# plot(log(na.omit(filter_reg$fert_use_ha)), fert_use_ols$fitted.values,xlab = "True values", ylab = "Model Fitted values", main = "Regression fits of synN use/ha values"  )
-# abline(b=1, a=0) #values fall around this 1:1 line
-```
 #Generate predictions
-```{r Calculate predicted input emissions and use per ha by input, scenario and region}
+```{r Unused now Calculate predicted input emissions and use per ha by input, scenario and region}
 #create empty dataframe to add in fixed effect regression results
 reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
 
@@ -292,7 +265,7 @@ reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr 
 reg_fe_results <- reg_fe_results %>% mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High")))
 ```
 
-```{r Calculate total input emissions for each input source and region}
+```{r Unused now Calculate total input emissions for each input source and region}
 #create dataframe with only totals for each emissions type and for all input emissions, by region and scenario
 region_totals <- reg_fe_results %>% 
   filter(dep_var %in% c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha")) %>% #filter to only emissions variables
@@ -318,13 +291,12 @@ scenarios_predictions <- scenarios %>%
 
 scenarios_predictions <- scenarios_predictions %>% #add predictions of per hectare emissions for each region
   mutate(
-    en_emiss_ha = exp(predict(en_emiss_ols, newdata = scenarios_predictions)),
-    fert_emiss_ha = exp(predict(fert_emiss_ols, newdata = scenarios_predictions)),
-    fert_m_emiss_ha = exp(predict(fert_m_emiss_ols, newdata = scenarios_predictions)),
-    m_emiss_ha = exp(predict(m_emiss_ols, newdata = scenarios_predictions)),
-    pest_emiss_ha = exp(predict(pest_emiss_ols, newdata = scenarios_predictions)),
-    tot_emiss_ha_single_mod = exp(predict(tot_emiss_ols, newdata = scenarios_predictions)),
-    tot_emiss_ha = en_emiss_ha+fert_emiss_ha+fert_m_emiss_ha+m_emiss_ha+pest_emiss_ha)
+    ha_e = exp(predict(en_emiss_ols, newdata = scenarios_predictions)),
+    ha_f = exp(predict(fert_emiss_ols, newdata = scenarios_predictions)),
+    ha_fm = exp(predict(fert_m_emiss_ols, newdata = scenarios_predictions)),
+    ha_m = exp(predict(m_emiss_ols, newdata = scenarios_predictions)),
+    ha_p = exp(predict(pest_emiss_ols, newdata = scenarios_predictions)),
+    ha_t = ha_e+ha_f+ha_fm+ha_m+ha_p) #calculate total emissions per ha
 
 #calculate variance and 95% CI for total emissions per ha for each region
 library(car)
@@ -339,72 +311,51 @@ calculate_variance <- function(model, new_data) {
   return(var_pred)
 }
 
-# Calculating variances
-var_en <- calculate_variance(en_emiss_ols, scenarios_predictions)
-var_f <- calculate_variance(fert_emiss_ols, scenarios_predictions)
-var_f_m <- calculate_variance(fert_m_emiss_ols, scenarios_predictions)
-var_m <- calculate_variance(m_emiss_ols, scenarios_predictions)
-var_p <- calculate_variance(pest_emiss_ols, scenarios_predictions)
-
-
-# Summing variances
-scenarios_predictions$total_var <- var_en + var_f + var_f_m + var_m + var_p
-
-# Calculating 95% CI
-z <- qnorm(0.975) # Z value for 95% CI
-scenarios_predictions <- scenarios_predictions %>%
-  mutate(
-    ci_lower = tot_emiss_ha - z * sqrt(total_var),
-    ci_upper = tot_emiss_ha + z * sqrt(total_var)
-  )
-```
-
-```{r Calculate total emissions from input use for Africa}
-#Calculate total emissions for each source, region and scenario
-scenarios_predictions <- scenarios_predictions %>% 
-  mutate(tot_t = tot_emiss_ha * arable_area,
-         tot_e = en_emiss_ha * arable_area,
-         tot_f = fert_emiss_ha * arable_area,
-         tot_fm = fert_m_emiss_ha * arable_area,
-         tot_m = m_emiss_ha * arable_area,
-         tot_p = pest_emiss_ha * arable_area) 
-
-#Calculate Variance for Each emission source, region and scenario 
-scenarios_predictions <- scenarios_predictions %>% 
-  mutate(
-    var_t = (arable_area^2)* total_var,
-    var_e = (arable_area^2)* var_en,
-    var_f = (arable_area^2)* var_f,
-    var_fm = (arable_area^2)* var_f_m,
-    var_m = (arable_area^2)* var_m,
-    var_p = (arable_area^2)* var_p
-  )
-
-#calculate Africa sum emissions and sum variance
-africa_sums <- scenarios_predictions %>% 
-  group_by(scenario) %>% 
-  summarize(across(c(tot_t, tot_e, tot_f, tot_fm, tot_m, tot_p, 
-                     var_t, var_e, var_f, var_fm, var_m, var_p), sum)) %>% 
-  pivot_longer(cols = -scenario, names_to = c(".value", "estimate"), names_pattern = "(.*)_(.*)")
-
 #Calculate Confidence Interval
 z <- qnorm(0.975) # Z value for 95% CI
 
-africa_sums <- africa_sums %>% 
+# Calculating variances
+scenarios_predictions <- scenarios_predictions %>% 
+  mutate( #calculate variances for each per ha value
+  var_e = calculate_variance(en_emiss_ols, scenarios_predictions),
+  var_f = calculate_variance(fert_emiss_ols, scenarios_predictions),
+  var_fm = calculate_variance(fert_m_emiss_ols, scenarios_predictions),
+  var_m = calculate_variance(m_emiss_ols, scenarios_predictions),
+  var_p = calculate_variance(pest_emiss_ols, scenarios_predictions),
+  var_t = var_e + var_f + var_fm + var_m + var_p) %>%  #calculate variance for total emissions/ha
+  #calculate confidence intervals for each per ha value
+  pivot_longer(cols = -c(country, scenario, harv_area, yield, luc, arable_area, production), names_to = c(".value", "estimate"), names_pattern = "(.*)_(.*)") %>% 
   mutate(
-    lwr = tot - z * sqrt(var),
-    upr = tot + z * sqrt(var)
-  )
-africa_sums
+    lwr_ha = ha - z * sqrt(var), #calculate using z value for CI
+    upr_ha = ha + z * sqrt(var)
+  ) %>% 
+  rename(fit_ha = ha, var_ha = var)
 ```
 
+```{r Calculate total emissions from input use for Africa}
+scenarios_predictions <- scenarios_predictions %>% 
+  mutate(fit_tot = fit_ha * arable_area,  #Calculate total emissions for each source, region and scenario
+         var_tot = (arable_area^2)* var_ha, #Calculate variance for total emissions for each source, region and scenario
+         lwr_tot = fit_tot - z * sqrt(var_tot), #Calculate 95% CI for total emissions for each source, region and scenario
+         upr_tot = fit_tot + z * sqrt(var_tot))
 
-```{r Calculate total input emissions for Africa with 95% confidence interval}
-#we calculate the sum separately since calculating a confidence interval for teh sum requires careful treatment
+#calculate Africa sum emissions and sum variance
+africa_sums <- scenarios_predictions %>% 
+  group_by(scenario, estimate) %>% 
+  summarize(across(c(fit_tot, var_tot, harv_area, luc, arable_area, production), sum)) %>% #sum emissions and variance across regions, by scenario, as well as production data
+  mutate( #calculate 95% CI for Africa totals
+    lwr_tot = fit_tot - z * sqrt(var_tot),
+    upr_tot = fit_tot + z * sqrt(var_tot),
+    country = "Africa", #add for joining to region dataframe
+    yield = production/arable_area) #calculate yield for Africa
+```
+
+```{r Unused. Alternative method of calculating 95% CI for Africa totals}
+#note that we don't report results from this method since it does not include summing emissions across sources and propogating the errors appropriately. However, this is a more precise method for calculaint CI for the individual emission sources since it accounts for the variance-covariance matrix of the coefficients including country fixed effects. This results in slightly larger CI's than the method we report; however the central estimates are the same and the larger CI's do not modify any of our conclusions. 
 
 #map models to model names
-models <- list(en_emiss_ols, fert_emiss_ols, fert_m_emiss_ols, m_emiss_ols, pest_emiss_ols, tot_emiss_ols)
-model_names <- c("en_emiss", "fert_emiss", "fert_m_emiss", "m_emiss", "pest_emiss", "tot_emiss")
+models <- list(en_emiss_ols, fert_emiss_ols, fert_m_emiss_ols, m_emiss_ols, pest_emiss_ols)
+model_names <- c("en_emiss", "fert_emiss", "fert_m_emiss", "m_emiss", "pest_emiss")
 scenario_names <- c("Baseline", "Projected", "High")
 
 #Define function to calculate sum and confidence interval across the regions
@@ -528,9 +479,10 @@ afr_totals <- bind_rows(results_list, .id = "source") %>%
   pivot_wider(names_from = source, values_from = value)
 ```
 
-
 #Add LUC
 ```{r Add LUC data to input emissions data}
+detach("package:car", unload=TRUE) #remove to simplify use of recode function and anything else masked by car
+
 region_key <- c(C_Afr="Middle", E_Afr="Eastern", N_Afr = "Northern", S_Afr="Southern", W_Afr="Western")
 
 convert_luc_co2 <- function(x){return(x * kg_to_mt/38)} # convert to million metric ton and divide by 38, the number of years between 2012 and 2050, this division annualizes the emissions
@@ -549,79 +501,77 @@ luc_co2_region <- luc_co2_region %>%
               ungroup() %>% 
               mutate(region = "Africa"))
 
-all_emiss <- region_totals %>% bind_rows(afr_totals) %>% #combine region and Africa values
-  inner_join(luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
-  mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
+#combine region and Africa values with LUC data
+#return to delete
+all_emiss <- scenarios_predictions %>% bind_rows(africa_sums) %>%
+  rename(region=country) %>% select(-luc) %>% #change and remove cols for joining; luc already in dataframe being joined to. values confirmed to be identical.
+  inner_join(luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many")
 
-write_csv(all_emiss,"results/all_emiss_region.csv")
+write_csv(all_emiss,"results/supplementary/all_emiss_region.csv")
 ```
 
 #Sensitivity analysis
 ```{r Calculate LUC and total input emissions by scenario and region, under linear model}
-#fit linear model to filtered data set with african regions aggregated
-afr_tot_emiss_linear_mod <- lm(africa_level_reg, formula = tot_emiss_ha ~ yield + factor(country))
+#fit linear model for emissions per ha to filtered data set
+e_linear <- lm(filter_reg, formula = (en_emiss_ha) ~ (yield) + factor(country)) #Energy Emissions OLS Regression
+f_linear <- lm(filter_reg, formula = (fert_emiss_ha) ~ (yield) + factor(country)) #Synthetic N emissions OLS Regression
+fm_linear <- lm(filter_reg, formula = (fert_m_emiss_ha) ~ (yield) + factor(country)) #Synthetic N manufacturing emissions OLS Regression
+m_linear <- lm(filter_reg, formula = (m_emiss_ha) ~ (yield) + factor(country)) #Energy embodied in machinery OLS Regression
+p_linear <- lm(filter_reg, formula = (pest_emiss_ha) ~ (yield) + factor(country)) #Pesticides manufacturing emissions OLS Regression
 
-#Generate predictions for Africa under each yield scenario
-reg_linear_afr_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
-i=1
-for (scenario in unique(scenarios$scenario)){
-  reg_linear_afr_results[i,] = c("tot_emiss_ha", 
-                         scenario, 
-                         "Africa", 
-                         as.list(as_vector(predict(afr_tot_emiss_linear_mod, #choose regression model 
-                              newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
-                              interval = "confidence", level = 0.95
-                              ))))
-    i=i+1
-  }
+#Generate predictions for under each yield scenario
+linear_predictions <- scenarios %>% filter(country!="Africa") #use yield scenarios for each region
+linear_predictions <- linear_predictions %>% 
+  #add predictions of per hectare emissions for each region
+  mutate(
+    ha_e = predict(e_linear, newdata = linear_predictions),
+    ha_f = predict(f_linear, newdata = linear_predictions),
+    ha_fm = predict(fm_linear, newdata = linear_predictions),
+    ha_m = predict(m_linear, newdata = linear_predictions),
+    ha_p = predict(p_linear, newdata = linear_predictions),
+    ha_t = ha_e+ha_f+ha_fm+ha_m+ha_p)
 
-#Calculate total predicted input emissions for scenario
-reg_linear_afr_results <- reg_linear_afr_results %>% 
-  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
-  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
-  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
-  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
-  pivot_wider(names_from = dep_var, values_from = total_emiss) %>% rename(tot_emiss = tot_emiss_ha)  #make dataframe wide
+#calculate Africa sum total input emissions
+africa_linear_sums <- linear_predictions %>% 
+  mutate(total_emiss = ha_t*arable_area, region="Africa") %>%
+  group_by(scenario, region) %>%
+  summarize(tot_emiss = sum(total_emiss))
 
 #Add LUC
-reg_linear_afr_results <- inner_join(reg_linear_afr_results, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
+africa_linear_sums <- inner_join(africa_linear_sums, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
 ```
 
 ```{r Calculate LUC and total input emissions by scenario and region, with data filter to after 1990}
 #re-run log-log regression with data filterted to adfter 1990, which is when pesticide use data is first available. all values are NA before then
-#fit linear model to filtered data set with african regions aggregated
-afr_tot_emiss_1990_mod <- lm(africa_level_reg %>% filter(year>=1990), formula = log(tot_emiss_ha) ~ log(yield) + factor(country))
+#fit log-log model for emissions per ha to filtered data set
+e_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Energy Emissions OLS Regression
+f_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N emissions OLS Regression
+fm_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(fert_m_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N manufacturing emissions OLS Regression
+m_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(m_emiss_ha) ~ log(yield) + factor(country)) #Energy embodied in machinery OLS Regression
+p_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(pest_emiss_ha) ~ log(yield) + factor(country)) #Pesticides manufacturing emissions OLS Regression
 
-#Generate predictions for Africa under each yield scenario
-afr_1990_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
-i=1
-for (scenario in unique(scenarios$scenario)){
-  afr_1990_results[i,] = c("tot_emiss_ha", 
-                         scenario, 
-                         "Africa", 
-                         as.list(as_vector(predict(afr_tot_emiss_1990_mod, #choose regression model 
-                              newdata = scenarios[scenarios$country=="Africa" & scenarios$scenario==scenario, c("country", "yield")], 
-                              interval = "confidence", level = 0.95
-                              ))))
-    i=i+1
-  }
+#Generate predictions for under each yield scenario
+predictions_1990 <- scenarios %>% filter(country!="Africa") #use yield scenarios for each region
+predictions_1990 <- predictions_1990 %>% 
+  mutate( #add predictions of per hectare emissions for each region
+    ha_e = exp(predict(e_1990, newdata = predictions_1990)),
+    ha_f = exp(predict(f_1990, newdata = predictions_1990)),
+    ha_fm = exp(predict(fm_1990, newdata = predictions_1990)),
+    ha_m = exp(predict(m_1990, newdata = predictions_1990)),
+    ha_p = exp(predict(p_1990, newdata = predictions_1990)),
+    ha_t = ha_e+ha_f+ha_fm+ha_m+ha_p)
 
-#Calculate total predicted input emissions for scenario
-afr_1990_results <- afr_1990_results %>% 
-  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
-  mutate(value = exp(value)) %>% #convert from log scale to original scale
-  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
-  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
-  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
-  pivot_wider(names_from = dep_var, values_from = total_emiss) %>% rename(tot_emiss = tot_emiss_ha)  #make dataframe wide
+#calculate Africa sum total input emissions
+africa_1990_sums <- predictions_1990 %>% 
+  mutate(total_emiss = ha_t*arable_area, region="Africa") %>%
+  group_by(scenario, region) %>%
+  summarize(tot_emiss = sum(total_emiss))
 
 #Add LUC
-afr_1990_results <- inner_join(afr_1990_results, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
+africa_1990_sums <- inner_join(africa_1990_sums, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
-afr_1990_results %>% filter(estimate == "fit", c_loss_ratio == "H")
 ```
-
 
 #Graph results
 ```{r Set BTI style guide for  graphing}
@@ -630,10 +580,10 @@ bti_colors <- c("#0d4459", "#00a990", "#d05527", "#a33332",
                 "#b381d0",  "#dfb9a6", "#b2b2b1", "#2A2A2A", "#ecc627")
 
 #general plot theme
-theme_bti <- function (base_size = 14, base_family = "Helvetica") {
+theme_bti <- function (base_size = 6, base_family = "Helvetica") {
   theme_classic() %+replace% 
-    theme(plot.title = element_text(color = "black",  size = 14), 
-          strip.text.x = element_text(size = 14),
+    theme(plot.title = element_text(color = "black",  size = 12), 
+          strip.text.x = element_text(size = 10),
           strip.background = element_blank(),
           
           #gridlines
@@ -645,13 +595,16 @@ theme_bti <- function (base_size = 14, base_family = "Helvetica") {
           #legend
           legend.position = "bottom", #legend default position is bottom
           legend.key = element_rect(fill = "#FFFFFF00", color = NA), #no border around legend items
-          legend.text = element_text(size=10),
-          legend.title = element_text(size=10),
+          legend.text = element_text(size=8),
+          legend.title = element_text(size=8),
           #axes
           axis.line.x = element_line(color="black", size = .5),
           axis.line.y = element_line(color="black", size = .5),
-          axis.title.y = element_text(size = 12, angle = 90), 
-          axis.title.x = element_text(size = 12), 
+          axis.title.y = element_text(size = 8, angle = 90,
+                                      margin = margin(t = 0, r = 5, b = 0, l = 0)), #set y axis title further left from axis 
+          axis.title.x = element_text(size = 8), 
+          axis.text.x = element_text(size = 8),
+          axis.text.y = element_text(size = 8),
           #logo 
           plot.margin = unit(c(0.5, 0.5, 2, 0.5), "lines") # add space for logo
     )
@@ -660,6 +613,7 @@ theme_bti <- function (base_size = 14, base_family = "Helvetica") {
 
 ```{r Set up data for graphing and tables}
 c_loss_selected <- "S" #edit to change which soil carbon loss scenario is used for following graphs. options are S (searchinger), H (houghton)
+c_loss_excluded <- "H"
 luc_scenario_excluded <- "low" #edit to change which LUC scenario is used for following graphs. options are low and high
 luc_scenario_included <- "luc_co2_high" #as above options are luc_co2_low and luc_co2_high
 
@@ -685,30 +639,32 @@ crop_full_names <-c(
   "whea" = "Wheat")
 
 fig_dat <- all_emiss %>% 
-  filter(c_loss_ratio == c_loss_selected) %>%
-  select(-c_loss_ratio, -paste0("luc_co2_", luc_scenario_excluded), -tot_co2_high, -tot_co2_low) %>% 
-  mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High"))) %>%  #change order of scenario column
-  pivot_longer(cols = c(en_emiss:starts_with("luc_co2")),names_to = "source", values_to = "emiss") %>% #restructure so there is a column for the lwr and upr input emission totals
-  pivot_wider(names_from = estimate, values_from = emiss) %>%  #restructure so there is a column for the lwr and upr input emission totalsest)
-  mutate(lwr = case_when(source == luc_scenario_included ~ NA_real_, TRUE ~ lwr), #set lwr and upr to NA when source equals "luc_co2_low" or "luc_co2_high" so that error bars are not plotted for LUC emissions
-          upr = case_when(source == luc_scenario_included ~ NA_real_, TRUE ~ upr))
+  filter(c_loss_ratio != c_loss_excluded) %>% #filter to soil carbon loss scenario being used
+  select(-c_loss_ratio, -paste0("luc_co2_", luc_scenario_excluded)) %>% #filter out luc scenario being excluded
+  rename(source=estimate) %>% 
+  mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High"))) %>%    #change order of scenario column
+  pivot_longer(cols = c(fit_tot, luc_scenario_included),
+               names_to = "source_new", 
+               values_to = "tot") %>% 
+  mutate(lwr_tot = case_when(source_new == luc_scenario_included ~ NA_real_, TRUE ~ lwr_tot), #set lwr and upr to NA when source equals "luc_co2_low" or "luc_co2_high" so that error bars are not plotted for LUC emissions
+         upr_tot = case_when(source_new == luc_scenario_included ~ NA_real_, TRUE ~ upr_tot))
 ```
 
 ```{r Fig 1. Total Africa LUC and Input Emissions by Scenario}
 #column chart showing total LUC emissions and total input emissions (sum of energy, fertilizer, pesticide, machinery), by scenario
 fig1 <- fig_dat %>% 
-  filter(source %in% c(luc_scenario_included, "tot_emiss"), region=="Africa") %>% 
+  filter(source =="t", region=="Africa") %>% 
   ggplot()+
-  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
-  ggtitle("Emissions from input use and LUC by scenario for Africa.") + 
+  geom_col(aes(x = scenario, y = tot, fill = source_new), position = "dodge") +
+  geom_errorbar(aes(x = scenario, ymin = lwr_tot, ymax = upr_tot, group=source_new), width = 0.2, position = position_dodge(.9))+
+  #ggtitle("Emissions from input use and LUC by scenario for Africa.") + #comment out title for adding to manuscript where title is added in word
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
   labs(fill = "Emission Source")+  #caption = "95% confidence interval shown only for total input emissions."
   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))+ #move y origin to plot margin/line
   theme_bti()+
-  scale_fill_manual(values = setNames(c(bti_colors[1], bti_colors[2]), c("tot_emiss", luc_scenario_included)), #set colors
-                    labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("tot_emiss", luc_scenario_included))) #set labels
+  scale_fill_manual(values = setNames(c(bti_colors[1], bti_colors[2]), c("fit_tot", luc_scenario_included)), #set colors
+                    labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("fit_tot", luc_scenario_included))) #set labels
 
 fig1
 ggsave(plot = fig1, filename = "results/graphs/manuscript/fig1.png", width = 6, height = 4, units = "in", dpi = 300)
@@ -717,18 +673,19 @@ ggsave(plot = fig1, filename = "results/graphs/manuscript/fig1.png", width = 6, 
 ```{r Fig 2. Africa Input Emissions by Scenario and Source}
 #column chart showing each source of input emissions for Africa, by scenario
 fig2 <- fig_dat %>% 
-  filter(!source %in% c(luc_scenario_included, "tot_emiss"), region=="Africa") %>% #filter just to individual inputs
+  filter(source_new != luc_scenario_included, source!="t", region=="Africa") %>% #filter just to individual inputs
   ggplot()+
-  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
-  ggtitle("Emissions from input use by scenario for Africa.") + 
+  geom_col(aes(x = scenario, y = tot, fill = source), position = "dodge") +
+  geom_errorbar(aes(x = scenario, ymin = lwr_tot, ymax = upr_tot, group=source), width = 0.2, position = position_dodge(.9))+
+  #ggtitle("Emissions from input use by scenario for Africa.") + #comment out title for adding to manuscript where title is added in word
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
   labs(fill = "Emission Source")+  #caption = "95% confidence interval shown only for total input emissions."
   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))+ #move y origin to plot margin/line
   theme_bti()+
   scale_fill_manual(values=bti_colors, #set colors to bti colors
-                    labels = c("On-Farm Energy", "Synthetic N Application", "Synthetic N Manufacturing", "Pesticide Manufacturing", "Machinery Manufacturing")) #set labels
+                    labels = c("On-Farm Energy", "Synthetic N Application", "Synthetic N Manufacturing", "Pesticide Manufacturing", "Machinery Manufacturing"))+ #set labels
+  guides(fill = guide_legend(nrow = 2)) #set legend to two rows
 
 fig2
 ggsave(plot = fig2, filename = "results/graphs/manuscript/fig2.png", width = 6, height = 4, units = "in", dpi = 300)
@@ -737,18 +694,18 @@ ggsave(plot = fig2, filename = "results/graphs/manuscript/fig2.png", width = 6, 
 ```{r Fig S1. Total LUC and Input Emissions by Scenario for each region}
 #column chart showing total LUC emissions and total input emissions (sum of energy, fertilizer, pesticide, machinery), by scenario, for each region
 figS1 <- fig_dat %>% 
-  filter(source %in% c(luc_scenario_included, "tot_emiss"), region!="Africa") %>% 
+  filter(source=="t", region!="Africa") %>% #filter just to individual inputs
   ggplot()+
-  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
-  ggtitle("Emissions from input use and LUC by scenario for each region.") + 
+  geom_col(aes(x = scenario, y = tot, fill = source_new), position = "dodge") +
+  geom_errorbar(aes(x = scenario, ymin = lwr_tot, ymax = upr_tot, group=source_new), width = 0.2, position = position_dodge(.9))+
+  #ggtitle("Emissions from input use and LUC by scenario for each region.") + #comment out title for adding to manuscript where title is added in word
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
   facet_wrap(~region, scales = "free_y", ncol=3)+
   labs(fill = "Emission Source")+  #caption = "95% confidence interval shown only for total input emissions. "
   scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))+ #move y origin to plot margin/line
-  scale_fill_manual(values = setNames(c(bti_colors[1], bti_colors[2]), c("tot_emiss", luc_scenario_included)), #set colors
-                     labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("tot_emiss", luc_scenario_included)))+ #set labels
+  scale_fill_manual(values = setNames(c(bti_colors[1], bti_colors[2]), c("fit_tot", luc_scenario_included)), #set colors
+                     labels = setNames(c("Manufacturing and Use of Farm Inputs", "Land Use Change"), c("fit_tot", luc_scenario_included)))+ #set labels
   theme_bti() + 
   geom_hline(yintercept = 0, color = "black", linewidth = 1) #add x axis line since doesnt show up for all when facetted
 
@@ -759,11 +716,11 @@ ggsave(plot = figS1, filename = "results/graphs/supplementary/figs1.png", width 
 ```{r Fig S2. Input Emissions by Scenario and Source for each region}
 #column chart showing each source of input emissions for each region, by scenario
 figS2 <- fig_dat %>% 
-  filter(!source %in% c(luc_scenario_included, "tot_emiss"), region!="Africa") %>% 
+  filter(source_new != luc_scenario_included, source!="t", region!="Africa") %>% 
   ggplot()+
-  geom_col(aes(x = scenario, y = fit, fill = source), position = "dodge") +
-  geom_errorbar(aes(x = scenario, ymin = lwr, ymax = upr, group=source), width = 0.2, position = position_dodge(.9))+
-  ggtitle("Emissions from input use by scenario for each region.") + 
+  geom_col(aes(x = scenario, y = tot, fill = source), position = "dodge") +
+  geom_errorbar(aes(x = scenario, ymin = lwr_tot, ymax = upr_tot, group=source), width = 0.2, position = position_dodge(.9))+
+  #ggtitle("Emissions from input use by scenario for each region.") + #comment out title for adding to manuscript where title is added in word
   xlab("Scenarios") + 
   ylab("Greenhouse Gas Emissions (million metric tons CO2e)") + 
   facet_wrap(~region, scales = "free_y", ncol=3)+
@@ -772,14 +729,15 @@ figS2 <- fig_dat %>%
   scale_fill_manual(values=bti_colors, #set colors to bti colors
                     labels = c("On-Farm Energy", "Synthetic N Application", "Synthetic N Manufacturing", "Pesticide Manufacturing", "Machinery Manufacturing"))+ #set labels
   theme_bti() + 
-  geom_hline(yintercept = 0, color = "black", linewidth = 1) #add x axis line since doesnt show up for all when facetted
+  geom_hline(yintercept = 0, color = "black", linewidth = 1)+ #add x axis line since doesnt show up for all when facetted
+  guides(fill = guide_legend(nrow = 2)) #set legend to two rows
 
 figS2
 ggsave(plot = figS2, filename = "results/graphs/supplementary/figs2.png", width = 6, height = 4, units = "in", dpi = 300)
 ```
 
 ```{r Fig S3. Rebound Analysis Line Graph}
-
+#comment out title for adding to manuscript where title is added in word
 ```
 
 #Create and Export Tables
@@ -812,7 +770,7 @@ scenarios %>%
 ```{r Table S2. tons CO2 per ha per crop and country}
 read_csv("int_data/LUC_CO2_crops.csv") %>%  #read in kg co2/ha carbon loss for crops for all countries; need to filter to just countries included
   select(crop = id, country = ADMIN, co2_ha = tot_H) %>%  #filter to just Houghton loss ratio of 25%
-  mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d’Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
+  mutate(country = recode(country, "Republic of the Congo" = "Congo", "Ivory Coast" = "Côte d'Ivoire" , "eSwatini" = "Eswatini")) %>% #change country names to match FAO names
   filter(country %in% africa_scenario_countries, #filter to just countries included
          !crop %in% c("bean", "coff")) %>%  #remove bean & coffee since not matched w/ FOFA and fao data and so not used in analysis
   select(crop, Country = country, co2_ha) %>% #select just crops, country, and kg Co2/ha
@@ -843,11 +801,11 @@ tibble(
 ```{r Table S4. LUC and total input emissions by scenario and region}
 fig_dat %>% 
   mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
-  filter(source %in% c(luc_scenario_included, "tot_emiss")) %>% #filter to just LUC and total input emissions
-  select(-lwr, -upr, -luc) %>% #remove upper and lower bounds
-  pivot_wider(names_from = source, values_from = fit) %>% #pivot to have 1 column per source
-  mutate(`Total (Mt CO2e)` = get(luc_scenario_included) + tot_emiss) %>% #add total emissions column
-  rename(Scenario = scenario, Region = region, `LUC (Mt CO2e)` = luc_scenario_included, `Input Use (Mt CO2e)` = tot_emiss) %>%  #rename columns for presentation
+  filter(source =="t") %>% #filter to just LUC and total input emissions
+  select(region, scenario, source_new, tot) %>% #remove upper and lower bounds
+  pivot_wider(names_from = source_new, values_from = tot) %>% #pivot to have 1 column per source
+  mutate(`Total (Mt CO2e)` = get(luc_scenario_included) + fit_tot) %>% #add total emissions column
+  rename(Scenario = scenario, Region = region, `LUC (Mt CO2e)` = luc_scenario_included, `Input Use (Mt CO2e)` = fit_tot) %>%  #rename columns for presentation
   arrange(Scenario, Region) %>%   #arder by scenario order, and regions alphabetically within
   mutate(across(-c(Scenario, Region), ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS4_LUC_and_total_input_emissions_by_scenario_and_region.csv")
@@ -873,30 +831,21 @@ reg_fe_results %>%
   select(-lwr, -upr) %>% #remove upper and lower bounds
   pivot_wider(names_from = dep_var, values_from = fit) %>% #pivot to have 1 column per source
   mutate(p_ha=p_ha*1000) %>%  #convert tons/ha to kg/ha
-  rename(Scenario = scenario, Region = region, `Pesticide Application (kg/ha)` = p_ha) %>%  #rename columns for presentation
+  rename(Scenario = scenario, Region = region, `Pesticide Application (kg active ingredient/ha)` = p_ha) %>%  #rename columns for presentation
   arrange(Scenario, Region) %>% #order by scenario order, and regions alphabetically within
   mutate(across(-c(Scenario, Region), ~round(., digits = decimals))) %>% #round values
   write_csv("results/tables/tableS6_pesticide_application_rate_by_scenario_and_region.csv")
 #output is in kg pesticide per hectare
 ```
 
-```{r Table S7. Region and AFrica Model slopes and intercepts}
-#RETURN TO UPDATE w/ new africa estimates
+```{r Table S7. Region and Africa Model slopes and intercepts}
 #generate table with the slope coefficient and intercept from each of the region-based regression models
 tibble(
   `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
   `Slope (b1)` = c(fert_emiss_ols$coefficients[2], fert_m_emiss_ols$coefficients[2], pest_emiss_ols$coefficients[2], en_emiss_ols$coefficients[2], m_emiss_ols$coefficients[2]),
   `Intercept (b0)` = c(fert_emiss_ols$coefficients[1], fert_m_emiss_ols$coefficients[1], pest_emiss_ols$coefficients[1], en_emiss_ols$coefficients[1], m_emiss_ols$coefficients[1])) %>%
   mutate(across(-`Emission Source`, ~round(., digits = decimals))) %>% #round values
-  write_csv("results/tables/tableS7a_region_model_slopes_and_intercepts.csv")
-
-#generate table with the slope coefficient and intercept from the regression models with AFrica data aggregated
-tibble(
-  `Emission Source` = c("Synthetic N application", "Manufacturing fertilizers", "Manufacturing pesticides", "On-farm fuel energy", "Machinery energy"),
-  `Slope (b1)` = c(afr_fert_emiss_ols$coefficients[2], afr_fert_m_emiss_ols$coefficients[2], afr_pest_emiss_ols$coefficients[2], afr_en_emiss_ols$coefficients[2], afr_m_emiss_ols$coefficients[2]),
-  `Intercept (b0)` = c(afr_fert_emiss_ols$coefficients[1], afr_fert_m_emiss_ols$coefficients[1], afr_pest_emiss_ols$coefficients[1], afr_en_emiss_ols$coefficients[1], afr_m_emiss_ols$coefficients[1])) %>%
-  mutate(across(-`Emission Source`, ~round(., digits = decimals))) %>% #round values
-  write_csv("results/tables/tableS7b_africa_model_slopes_and_intercepts.csv")
+  write_csv("results/tables/tableS7_region_model_slopes_and_intercepts.csv")
 ```
 
 ```{r Table S8. Fixed effects for each African Region in the regression models}
@@ -951,19 +900,22 @@ read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of
 ```
 
 ```{r Table S11. LUC (million ha) by region and scenario}
-luc_co2_region %>% select(Region = region, scenario, c_loss_ratio, luc) %>% 
+luc_co2_region %>% 
+   mutate(region = recode(region, "Middle" = "Middle Africa", "Eastern" = "Eastern Africa", "Northern" = "Northern Africa", "Southern" = "Southern Africa", "Western" = "Western Africa")) %>%  #change to full names for regions
+  select(Region = region, scenario, c_loss_ratio, luc) %>% 
   filter(c_loss_ratio == c_loss_selected) %>% 
   mutate(luc = luc / 1000000) %>% #convert to million ha
   pivot_wider(names_from = scenario, values_from = luc) %>% #pivot to wide format
   select(Region, Baseline, Projected, High) %>%  #select and reorder columns
+  arrange(Region) %>% #order regions alphabetically
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS11_LUC_mha_by_region.csv")
 ```
 
 ```{r Table S12. Sensitivity analysis: LUC and total input emissions by scenario and region, under linear model}
 #generate table with the sensitivity analysis results for LUC and total input emissions by scenario and region, under linear model
-reg_linear_afr_results %>% 
-  filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
+africa_linear_sums %>% 
+  filter(c_loss_ratio == c_loss_selected) %>% 
   select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
@@ -971,8 +923,8 @@ reg_linear_afr_results %>%
 ```
 
 ```{r Table S13. Sensitivity analysis: LUC and total input emissions by scenario and region, data filtered to >=1990}
-afr_1990_results %>% 
-  filter(c_loss_ratio == c_loss_selected, estimate == "fit") %>% 
+africa_1990_sums %>% 
+  filter(c_loss_ratio == c_loss_selected) %>% 
   select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
