@@ -573,6 +573,34 @@ africa_1990_sums <- inner_join(africa_1990_sums, luc_co2_region, by = c("scenari
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
 ```
 
+```{r Combine rebound LUC values with input emission values}
+#import luc emissions and arable land values for high scenario for rebound values
+r <- read_csv("int_data/rebound_luc_by_region.csv")
+
+#join with dataframe of predicted input emissions per hectare for high scenario
+r <- r %>% 
+  mutate(region = recode(region, !!!region_key)) %>%   #rename regions for joining
+  mutate(across(c(co2_low, co2_high), convert_luc_co2)) #convert luc emission values from kg to megaton/million metric ton and annualize
+  
+r <- scenarios_predictions %>% 
+  filter(scenario=="High") %>% 
+  select(country, estimate, fit_ha) %>% 
+  inner_join(r, by = join_by(country == region), relationship = "many-to-many")
+  
+#calculate total input emissions for each rebound value for high scenario 
+r <- r %>% 
+  mutate(fit_tot = fit_ha * a) %>%    #calculate total emissions for each source, region, and rebound scenario
+  group_by(estimate, rebound, c_loss_ratio) %>%  #summarize for africa
+  summarize(fit_tot = sum(fit_tot),
+            co2_low = sum(co2_low),
+            co2_high = sum(co2_high),
+            luc = sum(luc),
+            a = sum(a)) %>% 
+  pivot_wider(names_from = estimate, values_from = fit_tot) %>% 
+  mutate(emiss_tot_high = e+f+fm+m+p+co2_high, #calculate total for co2_high option
+         emiss_tot_low = e+f+fm+m+p+co2_low) #calculate total for co2_low option
+```
+
 #Graph results
 ```{r Set BTI style guide for  graphing}
 #define colors
@@ -737,7 +765,32 @@ ggsave(plot = figS2, filename = "results/graphs/supplementary/figs2.png", width 
 ```
 
 ```{r Fig S3. Rebound Analysis Line Graph}
-#comment out title for adding to manuscript where title is added in word
+#calculate difference in emissions from baseline scenario
+baseline_tot_emiss = fig_dat %>% 
+  filter(source =="t", region=="Africa", scenario=="Baseline") %>% 
+  group_by(scenario) %>% 
+  summarize(tot = sum(tot)) %>% pull()
+
+fig_s3_dat <- r %>% 
+  filter(c_loss_ratio != c_loss_excluded) %>% #filter to soil carbon loss scenario being used
+  mutate(emiss_diff = emiss_tot_high - baseline_tot_emiss) %>%  #return to fix so ideally selecting scenario isnt manual
+  select(rebound, emiss_diff)
+
+#line chart with rebound value on x-axis and difference in total emissions on y-axis
+figS3 <- ggplot(fig_s3_dat)+ 
+  geom_line(aes(x=rebound, y=emiss_diff)) + #graph diagonal line showing relationship between rebound /elasticity value  on x axis and difference in emissions on y.  
+  geom_hline(yintercept = 0, color = "grey")+ #highlight y=0 where high scenario starts having higher emissions 
+  xlab("Rebound") + 
+  ylab("Total Emissions Difference (million metric tons CO2e)") + 
+  scale_y_continuous(expand = expand_scale(mult = c(0.0, 0.1)))+ #move y origin to plot margin/line
+  theme_bti()
+
+figS3
+
+#save/export chart and data used for chart
+ggsave(plot = figS3, filename = "results/graphs/supplementary/figs3.png", width = 6, height = 4, units = "in", dpi = 300)
+
+write_csv(fig_s3_dat, "results/supplementary/figs3_rebound_data.csv")
 ```
 
 #Create and Export Tables
@@ -894,7 +947,7 @@ read_csv("int_data/LUC_CO2_crops.csv") %>% #read in country-crop level values of
   ) %>% 
   mutate(`LUC (t CO2e/ha)` = get(paste0("soil",c_loss_selected)) + veg,  #calculate total carbon loss from LUC with selected C loss ratio
          crop = recode(crop, !!!crop_full_names)) %>% #replace crop names w/full names
-  select(Crop=crop, `LUC (t CO2e/ha)`) %>%  #select only crop and LUC columns
+  select(Crop=crop, `Carbon Loss (t CO2e/ha)`) %>%  #select only crop and LUC columns
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS10_tCO2_per_ha_loss_by_crop_for_included_countries.csv")
 ```

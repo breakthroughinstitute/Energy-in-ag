@@ -159,6 +159,7 @@ d[d=="Sweet Potato and Yams"] <- "swpy"
 d[d=="Wheat"] <- "whea"
 
 d <- d %>% filter(Item %in% unique(CO2_loss$id)) #filter out crops not included in CO2_loss dataset
+write_csv(d, "int_data/country_and_crop_scenarios_filtered.csv")
 
 # Aggregate by region -----------------------------------------------------
 scenario_d <- d %>% 
