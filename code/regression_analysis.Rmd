@@ -47,8 +47,9 @@ fert_use_per_ha <- read_csv("raw_data/faostat/fert_use_per_ha_cropland.csv") %>%
 fert_use <- read_csv("raw_data/faostat/fert_use.csv") %>% select(Country = Area, Year, fert_use = Value) %>% mutate(fert_use= fert_use*1000)
 #N agricultural use. units: convert from original units of tonnes N to kg N. timeframe: 1961-2020
 
-#Yield and Cropland Data from calculate_calories_per_cropland.Rmd
+#Production and Cropland Data from calculate_calories_per_cropland.Rmd
 prod <- read_csv("int_data/prod.cropland.csv")
+#total kcal and cropland area across all crops by country & year. 1961-2020
 
 #scenarios for regression analysis
 scenarios <- read_csv("int_data/scenarios.csv") %>%  #yields are in kcal/ha
@@ -541,6 +542,32 @@ africa_linear_sums <- linear_predictions %>%
 africa_linear_sums <- inner_join(africa_linear_sums, luc_co2_region, by = c("scenario", "region"), relationship = "many-to-many") %>%  #join input and LUC emissions
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
 ```
+
+```{r Compare linear and log regression models}
+
+#energy e_lin_r =   e_log_r = e_lin_qq = 
+plot(e_linear$fitted.values, e_linear$residuals)
+plot(en_emiss_ols$fitted.values, en_emiss_ols$residuals)
+qqnorm(e_linear$residuals)
+qqline(e_linear$residuals)
+qqnorm(en_emiss_ols$residuals)
+qqline(en_emiss_ols$residuals)
+plot(e_linear$fitted.values, e_linear$model$`(en_emiss_ha)`)
+plot(en_emiss_ols$fitted.values, en_emiss_ols$model$`log(en_emiss_ha)`)
+```
+
+```{r for fertilizer}
+plot(f_linear$fitted.values, f_linear$residuals)
+plot(fert_emiss_ols$fitted.values, fert_emiss_ols$residuals)
+qqnorm(f_linear$residuals)
+qqline(f_linear$residuals)
+qqnorm(fert_emiss_ols$residuals)
+qqline(fert_emiss_ols$residuals)
+plot(f_linear$fitted.values, f_linear$model$`(fert_emiss_ha)`)
+plot(fert_emiss_ols$fitted.values, fert_emiss_ols$model$`log(fert_emiss_ha)`)
+```
+
+
 
 ```{r Calculate LUC and total input emissions by scenario and region, with data filter to after 1990}
 #re-run log-log regression with data filterted to adfter 1990, which is when pesticide use data is first available. all values are NA before then
