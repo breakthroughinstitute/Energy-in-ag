@@ -39,7 +39,9 @@ m_energy_ols <- lm(filter_reg, formula = log(m_energy_ha) ~ log(yield) + factor(
 ```
 
 #Generate predictions
-```{r Unused now Calculate predicted input emissions and use per ha by input, scenario and region}
+```{r Calculate predicted input emissions and use per ha by input, scenario and region}
+#primarily used to create table (at end of code) with input use per ha. also used in alternate way of calculating CI's, which we dont currently report.
+
 #create empty dataframe to add in fixed effect regression results
 reg_fe_results <- tibble(dep_var=character(), scenario = character(), region = character(), fit=double(), lwr = double(), upr = double())
 
@@ -73,8 +75,6 @@ reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr 
 #convert scenario in reg_fe_results to factor variable
 reg_fe_results <- reg_fe_results %>% mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High")))
 ```
-
-
 
 ```{r Calculate total emissions per ha from input use by region and scenario}
 #create dataframe for predictions by region
