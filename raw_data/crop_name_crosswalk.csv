@@ -1,0 +1,52 @@
+﻿no,id,name,spam_type,spam_2010,spam2005v3r1,spam2000,calorie_conversion,fofa,searchinger_crop_carbon
+1,#N/A,Arabica Coffee,non-food,acof,acof,#N/A,#N/A,"Growing of coffee, green",Coffee beans (green)
+2,banp,Banana,food,bana,bana,banp,Bananas,Growing of bananas,Banana
+3,banp,Bananas and plantains,food,#N/A,#N/A,banp,#N/A,#N/A,
+4,barl,Barley,food,barl,barl,barl,Barley,Growing of barley,Barley grains
+5,bean,Bean,food,bean,bean,bean,"Beans, dry",#N/A,Common beans
+6,cass,Cassava,food,cass,cass,cass,Cassava,Growing of cassava,Cassava tubers
+7,#N/A,Chickpea,food,chic,chic,#N/A,Chick peas,#N/A,Chickpeas
+8,#N/A,Cocoa,non-food,coco,coco,#N/A,#N/A,Growing of cocoa beans,Cocoa beans (dried)
+9,#N/A,Coconut,food,cnut,cnut,#N/A,Coconuts,Growing of coconuts,Coconuts
+10,coff,Coffee,non-food,#N/A,#N/A,coff,#N/A,"Growing of coffee, green",Coffee beans (green)
+11,cott,Cotton,non-food,cott,cott,cott,Cottonseed,Growing of raw cotton,Seed cotton
+12,#N/A,Cowpea,food,cowp,cowp,#N/A,"Cow peas, dry",#N/A,Cowpeas
+13,grou,Groundnut,food,grou,grou,grou,"Groundnuts, with shell",Growing of groundnuts,Groundnut pods
+14,#N/A,Lentil,food,lent,lent,#N/A,Lentils,#N/A,Lentils
+15,maiz,Maize,food,maiz,maiz,maiz,Maize,Growing of grain maize,Maize grains
+16,mill,Millet,food,#N/A,#N/A,mill,Millet,Growing of millet,Millet grains
+17,#N/A,Oilpalm,non-food,oilp,oilp,#N/A,Oil palm fruit,Growing of oil palm fruit,Oil palm fruit bunches
+18,#N/A,Other Cereals,food,ocer,ocer,#N/A,#N/A,Growing of other cereals,Cereals
+19,ofib,Other Fibre Crops,non-food,ofib,ofib,ofib,#N/A,Growing of other fibre crops,#N/A
+20,ooil,Other Oil Crops,non-food,ooil,ooil,ooil,#N/A,Growing of other oilseeds,Oil crops (excl cotton)
+21,opul,Other Pulses,food,opul,opul,opul,#N/A,Growing of dried pulses,Pulses
+22,#N/A,Other Roots,food,orts,orts,#N/A,#N/A,Growing of other roots and tubers,Starchy roots
+23,#N/A,Pearl Millet,food,pmil,pmil,#N/A,Millet,Growing of millet,Millet grains
+24,#N/A,Pigeonpea,food,pige,pige,#N/A,Pigeon peas,#N/A,Pigeon peas
+25,banp,Plantain,food,plnt,plnt,banp,Plantains and others,Growing of plantains,Plantains
+26,pota,Potato,food,pota,pota,pota,Potatoes,Growing of potatoes,White potato tubers
+27,#N/A,Rapeseed,non-food,rape,rape,#N/A,Rapeseed,Growing of rape and mustardseed,Canola seeds
+28,#N/A,Rest of Crops,non-food,rest,rest,#N/A,#N/A,#N/A,Other crops
+29,rice,Rice,food,rice,rice,rice,"Rice, paddy",Growing of paddy rice,Rice grains (rough)
+30,#N/A,Robusta Coffee,non-food,rcof,rcof,#N/A,#N/A,"Growing of coffee, green",Coffee beans (green)
+31,#N/A,Sesameseed,non-food,sesa,sesa,#N/A,Sesame seed,Growing of sesame seed,Oil crops (excl cotton)
+32,#N/A,Small Millet,food,smil,smil,#N/A,Millet,Growing of millet,Millet grains
+33,sorg,Sorghum,food,sorg,sorg,sorg,Sorghum,Growing of sorghum,Sorghum grains
+34,soyb,Soybean,food,soyb,soyb,soyb,Soybeans,Growing of soybeans,Soybean seeds
+35,sugb,Sugarbeet,non-food,sugb,sugb,sugb,Sugar beet,Growing of sugar beet,Sugar beet roots
+36,sugc,Sugarcane,non-food,sugc,sugc,sugc,Sugar cane,Growing of sugar cane,Sugar cane stems
+37,#N/A,Sunflower,non-food,sunf,sunf,#N/A,Sunflower seed,Growing of sunflower seed,Sunflower kernels
+38,swpy,Sweet Potato,food,swpo,swpo,swpy,Sweet potatoes,#N/A,Sweet potato tubers
+39,swpy,Sweet potato and yams,food,#N/A,#N/A,swpy,#N/A,Growing of sweet potato and yams,#N/A
+40,#N/A,Tea,non-food,teas,teas,#N/A,#N/A,Growing of tea,Tea leaves (dried)
+41,#N/A,Temperate Fruit,food,temf,temf,#N/A,#N/A,#N/A,Other fruit - temperate
+42,#N/A,Tobacco,non-food,toba,toba,#N/A,#N/A,Growing of tobacco,#N/A
+43,#N/A,Tropical Fruit,food,trof,trof,#N/A,#N/A,#N/A,Other fruit - tropical
+44,#N/A,Vegetables,food,vege,vege,#N/A,#N/A,#N/A,Vegetables
+45,whea,Wheat,food,whea,whea,whea,Wheat,Growing of wheat,Wheat grains
+46,swpy,Yams,food,yams,yams,swpy,Yams,#N/A,Yam tubers
+47,#N/A,Sugar crops,#N/A,#N/A,#N/A,#N/A,#N/A,#N/A,Sugar crops
+48,#N/A,Fruits,#N/A,#N/A,#N/A,#N/A,#N/A,#N/A,Fruits
+49,#N/A,Forage crops,#N/A,#N/A,#N/A,#N/A,#N/A,#N/A,Forage crops
+50,#N/A,Grasses/legumes,#N/A,#N/A,#N/A,#N/A,#N/A,#N/A,Grasses/legumes
+51,#N/A,Whole-maize,#N/A,#N/A,#N/A,#N/A,#N/A,#N/A,Whole-maize

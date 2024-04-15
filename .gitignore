@@ -16,12 +16,35 @@ Internal notes.md
 .qgz
 manuscript/
 code/old_code/
-#could add back in by removing from ignore file
-int_data/
-raw_data/
 results/
 key literature and references/
 Energy-Ag (old?)/
 code/calculate_calories_per_ha_cropland.nb.html
 code/QGIS/calculate_mill.qgz
 calculate_calories_per_ha_cropland.nb.html
+
+#raw data
+raw_data/qgis/
+raw_data/FOFA2050CountryData_Crop-production.csv
+raw_data/fao_fertilizer_pesticide_emission_intensity.xlsx
+
+#intermediate data - created by code
+int_data/countries_excluded_in_africa_in_fofa.csv
+int_data/countries_excluded_in_africa.csv
+int_data/countries_included_in_africa_in_fofa.csv
+int_data/country_and_crop_scenarios_filtered.csv
+int_data/fofa_kcal_excluded_from_mapspam_searchinger.csv
+int_data/qgis_output
+
+
+#intermediate data to keep. Commented out so it is not ignored
+#int_data/scenarios.csv
+#int_data/countries_included_in_africa.csv
+#int_data/rebound_luc_by_region.csv
+#int_data/input_data_cleaned_converted_aggregated.csv
+#int_data/input_data_cleaned_converted.csv
+#int_data/luc_co2_country_crop.csv
+#int_data/luc_co2_country.csv
+#int_data/LUC_CO2_crops.csv
+#int_data/luc_co2_region.csv
+#int_data/prod.cropland.csv
