@@ -1,0 +1,228 @@
+---
+title: "Prepare regression data"
+editor_options: 
+  chunk_output_type: inline
+---
+
+#SETUP
+```{r Load packages}
+library(tidyverse); library(naniar); library(janitor)
+```
+
+```{r Read in Data}
+#pesticide use
+pest_use <- read_csv("raw_data/faostat/pest_use.csv") %>% select(Country = Area, Year, pest_use = Value)
+#units: tonnes use in country inc. all herbicides, insecticide, fungicide etc. timeframe: 1990-2020
+
+#on-farm energy use emissions - converting to CO2e and subtracting fisheries energy emissions from total on-farm energy emissions
+energy_emiss <- read_csv("raw_data/faostat/energy_use_emissions.csv") %>% 
+  select(-Domain, -Unit) %>% #remove to avoid creating extra rows when pivoting since Units missing when value is NA
+  pivot_wider(names_from = Element, values_from = Value) %>% 
+  mutate(tot_co2e = (`Emissions (CH4)`*28) + (`Emissions (N2O)`*265) + `Emissions (CO2)`) %>%  # calculate total energy emissions, multiplying by AR5 GWP values FAO uses
+  select(Country = Area, Year, tot_co2e, Item) %>%
+  pivot_wider(names_from = Item, values_from = tot_co2e) %>% 
+  mutate(en_emiss = ifelse(is.na(`Total Energy`), NA, `Total Energy` - coalesce(`Energy used in fishery`, 0)),#calculate farm emissions as total - fishery, ensuring that the result is not NA just because Energy used in fishery is 
+         en_emiss = ifelse(en_emiss<0,NA,en_emiss)) %>%  #replace negative values w/ NA
+  select(Country, Year, en_emiss)
+#units: kilotonnes (i.e. gigagram) CO2e.  timeframe: 1970-2020
+
+#on-farm diesel use, used to estimate emissions embodied in machinery
+##we subtract out gas-diesel use in fisheries since FAO metadata says that the gas-diesel oil values  includes fisheries, then multiply by 40% to estimate embodied machinery energy, per Woods et al. (2010) https://royalsocietypublishing.org/doi/full/10.1098/rstb.2010.0172
+m_energy <- read_csv("raw_data/faostat/diesel_use.csv") %>% 
+  select(Country = Area, Year, Item, Value) %>% 
+  pivot_wider(names_from = Item, values_from = Value) %>% 
+  mutate(m_energy = (`Gas-Diesel oil` -coalesce(`Gas-diesel oils used in fisheries`, 0)) * 0.4,
+         m_energy = ifelse(m_energy<0,NA,m_energy)) %>%  #replace negative values w/ NA 
+  select(Country, Year, m_energy)
+#units: Terajoules. #timeframe 1970-2020
+
+#fertilizer application emissions
+fert_emiss <- read_csv("raw_data/faostat/fert_use_emissions.csv") %>% select(Country = Area, Year, fert_emiss = Value)
+#units: kilotonnes (i.e. gigagram) CO2e, using AR5 GWP. timeframe: 1961-2020
+
+#synthetic fertilizer use and use per ha cropland
+fert_use_per_ha <- read_csv("raw_data/faostat/fert_use_per_ha_cropland.csv") %>% select(Country = Area, Year, fert_use_ha = Value)
+#N use per ha of cropland. units: kg nutrient N/ha timeframe: 1961-2020
+
+fert_use <- read_csv("raw_data/faostat/fert_use.csv") %>% select(Country = Area, Year, fert_use = Value) %>% mutate(fert_use= fert_use*1000)
+#N agricultural use. units: convert from original units of tonnes N to kg N. timeframe: 1961-2020
+
+#Production and Cropland Data from calculate_calories_per_cropland.Rmd
+prod <- read_csv("int_data/prod.cropland.csv")
+#total production in kcal and cropland area (not harvested area) in ha, summed across all included crops by country & year. 1961-2020
+```
+
+```{r Calculate total fuel emissions, calculate emissions per ha for each input }
+#join datasets
+df <- energy_emiss %>% 
+  full_join(fert_emiss) %>% 
+  full_join(fert_use) %>% 
+  full_join(fert_use_per_ha) %>% 
+  full_join(pest_use) %>% 
+  full_join(m_energy) %>% 
+  full_join(prod, by =  c("Country" = "country", "Year" = "year"))
+
+#Fill in missing data for each column by country. Apply the last one carried forward method to each column in the dataframe (called df below), grouping by country so that if the first observation is NA, the function doesn't replace with observation from different country. Will not fill in data for previous years.
+df <- df %>% group_by(Country) %>% arrange(Country, Year) %>% fill(en_emiss:cropland)
+
+#Calculate each emissions or input use per ha, dividing total by cropland area (not harvested area)
+df$en_emiss_ha <-df$en_emiss/df$cropland #units are gigagrams CO2e/ha of cropland 
+df$p_ha <- df$pest_use/df$cropland #units are tons applied/ha of cropland
+df$fert_emiss_ha <- df$fert_emiss/df$cropland#units are gigagrams CO2e/ha of cropland
+df$m_energy_ha <- df$m_energy/df$cropland#units are Terajoules/ha of cropland
+
+#calculate yield
+df$yield <-  df$tot_kcal/df$cropland #units are kilocal/ha of cropland 
+```
+
+```{r Clean Data }
+df <-  clean_names(df)  #makes all names lower case
+
+#Determine if all yield values are non-zero
+sum(df$tot_kcal ==  0, na.rm=T) #none zero
+sum(df$cropland ==  0, na.rm=T) #none zero
+
+#check for duplicate rows
+get_dupes(df, country, year) # no duplicates found
+
+#count fuel emissions per ha, pesticide, and synthetic N observations by country
+df %>% group_by(country) %>% summarize(count = sum(is.na(en_emiss_ha)==FALSE)) 
+df %>% group_by(country) %>% summarize(count = sum(is.na(p_ha)==FALSE))
+df %>% group_by(country) %>% summarize(count = sum(is.na(fert_emiss_ha)==FALSE))
+#results indicate different number of obs per country, an unbalanced panel dataset
+
+#Convert 0's to NA's  - Not likely that a country has 0 fertilizer or fuel use if production and cropland  values are all non-zero. Likely that the "0" is missing data. These false 0's might influence regression estimates. All 0's will be converted to NAs and the regression will automatically eliminate all NAs.
+df_clean <- naniar::replace_with_na_all(data = df, condition = ~.x == 0)
+
+# #Graph data to inspect for outliers
+# boxplot(df$fert_use_ha)
+# boxplot(df$p_ha) #visual representation of data points and outliers. #values are generally within 0.137 tons P/ha maximum (from World Bank) ; 5698 values are NA
+# plot(df$yield, df$en_emiss_ha) #there are some values for which yields are low but fuel emissions per ha is above 0.010 Gg/ha, values that are higher than 0.5 Gg/ha are nearly all from Singapore. Others that are above 0.15 include Bermuda, Hong Kong, and Kuwait.
+# boxplot(df$en_emiss_ha) #429 outliers
+# plot(df$yield, df$m_energy_ha)  #outliers with values > 1 primarily Singapore, China Hong Kong, Kuwait
+# plot(df$yield, df$fert_emiss_ha) #some high values have low yields, but values are substantially more clustered (w/ less extreme outliers) than for fert_use_ha, p_ha, en_emiss_ha, and m_energy_ha. 2012 values are NA, values are lower in magnitude 
+# boxplot(df$fert_emiss_ha)
+# ggplot(df) + geom_density(aes(fert_emiss_ha))
+
+#remove countries with substantial and unexplained outlier values
+outlier_en_countries <- df_clean %>% filter(en_emiss_ha>=0.15) %>% distinct(country) %>% pull() 
+outlier_p_countries <- df_clean %>% filter(p_ha>=0.1) %>% distinct(country) %>% pull() 
+outlier_m_countries <- df_clean %>% filter(m_energy_ha>=1.0) %>% distinct(country) %>% pull() 
+df_clean <- df %>% filter(!country %in% c(outlier_en_countries, outlier_p_countries, outlier_m_countries))
+
+# #Visualize outlier yield values
+# summary(df$yield)
+# boxplot(df$yield)
+# hist(df$yield,
+#   xlab = "yield",
+#   main = "Histogram of yield",
+#   breaks = sqrt(nrow(df))) # set number of bins
+
+# #Barbados, Kuwait, Belgium, Martinque occupy many of the highest values, over 20 mill. Ireland has some too, especially after ~2011. China, mainland; Germany; Netherlands, and several other ciountries that presumably report accurate data have similarly high values above 18 or 19 million. Given the variety of countries and the unknown reason why these are so high, we leave them in. The results are negligibly different than if we omit values greater than 20 million.
+
+# sum(df$yield >= 20000000, na.rm=T) #32 entries
+# sum(df$yield >= 20000000, na.rm=T)/nrow(df) #~.5% of total entries
+
+#df_clean <-  filter(df_clean, yield < 20000000) can comment in to omit particularly high yield values
+```
+
+```{r Convert input use to consistent units of emissions per ha}
+#Define conversion factors and emission factors
+fert_ef <- 5.66 #5.66 kg CO2 eq/kg product  is the fertilizer EF
+pest_ef <- 25.5 # 25.5 kg cO2e/kg applied is the pesticides EF
+tpes_ef <- 34 #emissions factor for primary energy supply for Africa (34 tons CO2 eq/Terajoules), carbon intensity of energy mix
+
+kg_to_mt <- 1/10^9 #conversion factor for kg to megatons (million metric tons)
+tons_to_mt <- 1/10^6 #conversion factor for metric tons to megatons (million metric tons)
+Gg_to_mt <- 1/10^3 #conversion factor for gigatons to megatons (million metric tons)
+
+df_conv <- df_clean %>% 
+  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
+         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha
+         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
+         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
+         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
+         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha) #total emissions per ha in MMT CO2e
+
+#test output is as expected
+head(df_conv)
+```
+
+```{r Save non-aggregated regresion input data}
+write_csv(df_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted.csv")
+```
+
+```{r Add region label for African countries} 
+#We create a new column here with the country name for all countries, but the region name fro Africa countries. THis is used below to aggregate African countries by region in order to mitigate issues with missing data for some countries. 
+
+#Define countries in regions. #Member countries within each region are from the UN Statistics division : https://unstats.un.org/unsd/methodology/m49/overview/
+country_groupings <- readxl::read_excel("raw_data/UNSD — Methodology.xlsx")
+
+Africa <- country_groupings %>% filter(`Region Name`=="Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+W_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Western Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+E_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Eastern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+C_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Middle Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+S_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Southern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+N_Afr <- country_groupings %>% filter(`Sub-region Name`=="Northern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
+
+#define countries in Africa without matching names in faostat data in order to make names consistent for joining
+Africa[which(!Africa %in% unique(df_conv$country))]
+
+#match all possible, based on manual examination of faostat countries.  non-matching ones aren't listed separately in faostat
+df_conv$country <- recode(df_conv$country, "Côte d'Ivoire"="Côte d’Ivoire")
+
+#create new column with names as factors to revise
+df_conv <- mutate(df_conv, Country_rename = country)
+
+# add region name for countries in african regions AND in list of africa countries included in FOFA. this ensures that later regressions are conducted such that the fixed effect for a region only includes countries that are in the region for which predictions are being made (i.e. FOFA projections for northern africa exclude libya)
+africa_scenario_countries <- read.csv(file = "int_data/countries_included_in_africa.csv")[,2]
+df_conv$Country_rename[df_conv$Country_rename %in% E_Afr & df_conv$country %in% africa_scenario_countries] <-  "E_Afr"
+df_conv$Country_rename[df_conv$Country_rename %in% W_Afr & df_conv$country %in% africa_scenario_countries] <-  "W_Afr"
+df_conv$Country_rename[df_conv$Country_rename %in% C_Afr & df_conv$country %in% africa_scenario_countries] <-  "C_Afr"
+df_conv$Country_rename[df_conv$Country_rename %in% S_Afr & df_conv$country %in% africa_scenario_countries] <-  "S_Afr"
+df_conv$Country_rename[df_conv$Country_rename %in% N_Afr & df_conv$country %in% africa_scenario_countries] <-  "N_Afr"
+```
+
+```{r Aggregate data for each African region}
+#define function to aggregate each variable by region
+aggregate_df <- function(region_data, region_name){
+  output <- region_data %>% ungroup() %>% select(year,cropland, tot_kcal, en_emiss, fert_use, pest_use, fert_emiss, m_energy) %>% 
+  group_by(year) %>%
+  summarise_all(sum, na.rm= TRUE) #sum total values across region by year
+  
+  #calculate per hectare values
+  output <- output %>% mutate(yield = tot_kcal/cropland, en_emiss_ha = en_emiss/cropland, p_ha = pest_use/cropland, fert_emiss_ha = fert_emiss/cropland, fert_use_ha = fert_use/cropland, m_energy_ha = m_energy/cropland, country = region_name)
+  
+  return(output)
+}
+
+#filter data by region
+reg_E <- dplyr::filter(df_conv, Country_rename == "E_Afr" )
+reg_W <- dplyr::filter(df_conv, Country_rename == "W_Afr" )
+reg_C <- dplyr::filter(df_conv, Country_rename == "C_Afr" )
+reg_S <- dplyr::filter(df_conv, Country_rename == "S_Afr" )
+reg_N <- dplyr::filter(df_conv, Country_rename == "N_Afr" )
+
+#aggregate values by region
+reg_E_aggregate <- aggregate_df(reg_E, "Eastern")
+reg_W_aggregate <- aggregate_df(reg_W, "Western")
+reg_C_aggregate <- aggregate_df(reg_C, "Middle")
+reg_S_aggregate <- aggregate_df(reg_S, "Southern")
+reg_N_aggregate <- aggregate_df(reg_N, "Northern")
+
+#Filter out Africa data from primary dataframe, keeping only non-Africa data 
+df_other_countries <- df_conv %>% filter(!Country_rename %in% c("N_Afr", "C_Afr", "S_Afr","E_Afr","W_Afr")) %>% select(-Country_rename)
+
+#Join aggregated Africa data with all of the countries' (non Africa) data
+df_agg <- bind_rows(df_other_countries, reg_C_aggregate, reg_E_aggregate, reg_S_aggregate, reg_W_aggregate, reg_N_aggregate)
+```
+
+```{r Explore data and remove outlier yield values}
+#Make sure any newly created 0's are converted to NAs, lm function automatically removes data with NAs 
+df_agg <- naniar::replace_with_na_all(data = df_agg, condition = ~.x == 0)
+```
+
+```{r Save aggregated regresion input data}
+write_csv(df_agg %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted_aggregated.csv")
+```
+
