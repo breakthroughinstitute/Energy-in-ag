@@ -20,6 +20,25 @@ scenarios <- read_csv("int_data/scenarios.csv") %>%  #yields are in kcal/ha
   mutate(scenario = factor(scenario, levels = c("b", "p", "h"), labels = c("Baseline", "Projected", "High")))
 ```
 
+```{r Create results folders if they don't exist}
+# Folders to create
+folders <- c("results", 
+             "results/supplementary", 
+             "results/tables", 
+             "results/graphs", 
+             "results/graphs/manuscript", 
+             "results/graphs/supplementary")
+
+# Check if each folder exists, create if not
+for (folder in folders) {
+  if (!dir.exists(folder)) {
+    dir.create(folder, recursive = TRUE)
+    message(paste0("Folder created: ", folder)) 
+  }
+}
+```
+
+
 # Fit regression models
 ```{r Run OLS log-log regressions with filtered regression data to estimate relationship between yield and input use factor}
 #regressions have country fixed effect where africa regions (e.g. east, west) are used as countries, enabling prediction later
