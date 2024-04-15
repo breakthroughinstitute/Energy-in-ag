@@ -11,7 +11,7 @@ library(tidyverse); library(naniar); library(janitor)
 
 ```{r Import data}
 #input data for regressions: input use, input emissions and kcal per hectare by country and year, with african countries aggregatedd at region-level. filtered to remove outliers.
-filter_reg <- read_csv("../int_data/input_data_cleaned_converted_aggregated.csv")
+filter_reg <- read_csv("int_data/input_data_cleaned_converted_aggregated.csv")
 
 #scenarios for regression analysis
 scenarios <- read_csv("int_data/scenarios.csv") %>%  #yields are in kcal/ha
@@ -74,24 +74,7 @@ reg_fe_results <- reg_fe_results %>% mutate(fit = exp(fit), lwr = exp(lwr), upr 
 reg_fe_results <- reg_fe_results %>% mutate(scenario = factor(scenario, levels = c("Baseline", "Projected", "High")))
 ```
 
-```{r Unused now Calculate total input emissions for each input source and region}
-#create dataframe with only totals for each emissions type and for all input emissions, by region and scenario
-region_totals <- reg_fe_results %>% 
-  filter(dep_var %in% c("en_emiss_ha", "fert_emiss_ha", "fert_m_emiss_ha", "m_emiss_ha", "pest_emiss_ha", "tot_emiss_ha")) %>% #filter to only emissions variables
-  pivot_longer(c(fit, lwr, upr), names_to = "estimate") %>% #make dataframe long
-  left_join(scenarios, by = c("region" = "country", "scenario")) %>% #add production scenario variables i.e. yield, area to fe regression results table.
-  mutate(total_emiss = value * arable_area) %>%  #calculate total emissions for each input source, region, and scenario, and lower and upper CI.
-  select(dep_var, scenario, region, estimate, total_emiss) %>% #select variables of interest
-  pivot_wider(names_from = dep_var, values_from = total_emiss)  #make dataframe wide
 
-#rename each emissions type to note that it is total emissions, not emissions per hectare
-names(region_totals)[names(region_totals) == "en_emiss_ha"] <- "en_emiss"
-names(region_totals)[names(region_totals) == "fert_emiss_ha"] <- "fert_emiss"
-names(region_totals)[names(region_totals) == "fert_m_emiss_ha"] <- "fert_m_emiss"
-names(region_totals)[names(region_totals) == "m_emiss_ha"] <- "m_emiss"
-names(region_totals)[names(region_totals) == "pest_emiss_ha"] <- "pest_emiss"
-names(region_totals)[names(region_totals) == "tot_emiss_ha"] <- "tot_emiss"
-```
 
 ```{r Calculate total emissions per ha from input use by region and scenario}
 #create dataframe for predictions by region
@@ -160,7 +143,7 @@ africa_sums <- scenarios_predictions %>%
 ```
 
 ```{r Unused. Alternative method of calculating 95% CI for Africa totals}
-#note that we don't report results from this method since it does not include summing emissions across sources and propogating the errors appropriately. However, this is a more precise method for calculaint CI for the individual emission sources since it accounts for the variance-covariance matrix of the coefficients including country fixed effects. This results in slightly larger CI's than the method we report; however the central estimates are the same and the larger CI's do not modify any of our conclusions. 
+#note that we don't report results from this method since it does not include summing emissions across sources and propogating the errors appropriately. However, this is a more precise method for calculating CI for the individual emission sources (e.g. fertilizer application) since it accounts for the variance-covariance matrix of the coefficients including country fixed effects. This results in slightly larger CI's than the method we report; however the central estimates are the same and the larger CI's do not modify any of our conclusions. 
 
 #map models to model names
 models <- list(en_emiss_ols, fert_emiss_ols, fert_m_emiss_ols, m_emiss_ols, pest_emiss_ols)
@@ -351,9 +334,7 @@ africa_linear_sums <- inner_join(africa_linear_sums, luc_co2_region, by = c("sce
   mutate(tot_co2_high = tot_emiss + luc_co2_high, tot_co2_low = tot_emiss + luc_co2_low) #calculate total emissions for low and high LUC approaches
 ```
 
-```{r Compare linear and log regression models}
-
-#energy e_lin_r =   e_log_r = e_lin_qq = 
+```{r Compare linear and log regression models for energy}
 plot(e_linear$fitted.values, e_linear$residuals)
 plot(en_emiss_ols$fitted.values, en_emiss_ols$residuals)
 qqnorm(e_linear$residuals)
@@ -364,7 +345,7 @@ plot(e_linear$fitted.values, e_linear$model$`(en_emiss_ha)`)
 plot(en_emiss_ols$fitted.values, en_emiss_ols$model$`log(en_emiss_ha)`)
 ```
 
-```{r for fertilizer}
+```{r Compare linear and log regression models for fertilizer}
 plot(f_linear$fitted.values, f_linear$residuals)
 plot(fert_emiss_ols$fitted.values, fert_emiss_ols$residuals)
 qqnorm(f_linear$residuals)
@@ -374,8 +355,6 @@ qqline(fert_emiss_ols$residuals)
 plot(f_linear$fitted.values, f_linear$model$`(fert_emiss_ha)`)
 plot(fert_emiss_ols$fitted.values, fert_emiss_ols$model$`log(fert_emiss_ha)`)
 ```
-
-
 
 ```{r Calculate LUC and total input emissions by scenario and region, with data filter to after 1990}
 #re-run log-log regression with data filterted to adfter 1990, which is when pesticide use data is first available. all values are NA before then
