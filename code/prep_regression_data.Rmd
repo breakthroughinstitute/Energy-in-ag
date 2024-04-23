@@ -236,9 +236,9 @@ df_agg_conv <- naniar::replace_with_na_all(data = df_agg, condition = ~.x == 0)
 
 ```{r Save regresion input data}
 #aggregated data used in regression
-write_csv(df_agg_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted_aggregated.csv")
+write_csv(df_agg_conv, "int_data/input_data_cleaned_converted_aggregated.csv")
 
 #non-aggregated regresion input data, for easy reference if needed
-write_csv(df_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted.csv")
+write_csv(df_conv, "int_data/input_data_cleaned_converted.csv")
 ```
 
