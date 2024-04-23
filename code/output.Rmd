@@ -1,0 +1,63 @@
+---
+title: "Wheat yield plots"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)  # Set echo to TRUE to display code execution
+options(warn = -1)
+library(tidyverse)
+library(patchwork)
+library(viridis)
+
+load("results.rdata")
+
+y = "value"
+x = "year"
+
+for (i in seq_along(results)) {
+#for (i in 2) {
+  
+  cat("##", results[[i]]$country, "\n") 
+
+  fit_plot <- ggplot(results[[i]]$data, aes_string(x = x, y = y)) +
+    geom_point() +
+    geom_line(aes_string(x = x, y = "best_model"), color = "red") +
+    labs(title = paste("Best model -", results[[i]]$best_model),  # Use the specified title
+         x = x,
+         y = y) +
+    theme_minimal()
+
+  qqplot <- ggplot(results[[i]]$data, aes(sample = residuals)) +
+    stat_qq() +
+    stat_qq_line(col = "red") +
+    labs(x = "Theoretical", y = "Sample", title = "Q-Q plot") +
+    theme_minimal()
+
+  residuals_plot <- ggplot(results[[i]]$data, aes(x = seq_along(residuals), y = residuals)) +
+    geom_point() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    labs(x = "Index", y = "Residuals", title = "Residuals Plot") +
+    theme_minimal()
+
+  acf_residuals <- acf(na.omit(results[[i]]$data$residuals), lag.max = 10, plot = FALSE)
+
+  acf_df <- data.frame(
+    lag = acf_residuals$lag,
+    acf = acf_residuals$acf
+  )
+
+  correlogram <- ggplot(acf_df, aes(x = lag, y = acf)) +
+    geom_hline(yintercept = 0) +
+    geom_segment(aes(xend = lag, yend = 0)) +
+    geom_point() +
+    labs(x = "Lag", y = "Autocorrelation", title = "Correlogram of residuals") +
+    theme_minimal()
+
+  # Combine plots using patchwork
+  combined_plots <- fit_plot + qqplot + residuals_plot + correlogram
+
+  # Print combined plots
+  print(combined_plots)
+
+}

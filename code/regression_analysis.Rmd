@@ -45,15 +45,23 @@ for (folder in folders) {
 
 #models for emissions per ha
 en_emiss_ols <- lm(filter_reg, formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Energy Emissions OLS Regression
+
 fert_emiss_ols <- lm(filter_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N emissions OLS Regression
+
 fert_m_emiss_ols <- lm(filter_reg, formula = log(fert_m_emiss_ha) ~ log(yield) + factor(country)) #Synthetic N manufacturing emissions OLS Regression
+
 m_emiss_ols <- lm(filter_reg, formula = log(m_emiss_ha) ~ log(yield) + factor(country)) #Energy embodied in machinery OLS Regression
+
 pest_emiss_ols <- lm(filter_reg, formula = log(pest_emiss_ha) ~ log(yield) + factor(country)) #Pesticides manufacturing emissions OLS Regression
+
 tot_emiss_ols <- lm(filter_reg, formula = log(tot_emiss_ha) ~ log(yield) + factor(country)) #Total emissions OLS Regression
 
 #models for input use per ha
-p_ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country)) #Pesticides Use OLS regression
-fert_use_ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country))#Synthetic N use or application OLS regression
+p_ols <- lm(filter_reg, formula = log(p_ha) ~ log(yield) + factor(country))
+
+#Pesticides Use OLS regression
+fert_use_ols <- lm(filter_reg, formula = log(fert_use_ha) ~ log(yield) + factor(country)) #Synthetic N use or application OLS regression
+
 m_energy_ols <- lm(filter_reg, formula = log(m_energy_ha) ~ log(yield) + factor(country))#Energy embodied in machinery OLS regression
 ```
 
