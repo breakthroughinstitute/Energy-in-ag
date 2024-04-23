@@ -126,32 +126,6 @@ df_clean <- df %>% filter(!country %in% c(outlier_en_countries, outlier_p_countr
 #df_clean <-  filter(df_clean, yield < 20000000) can comment in to omit particularly high yield values
 ```
 
-```{r Convert input use to consistent units of emissions per ha}
-#Define conversion factors and emission factors
-fert_ef <- 5.66 #5.66 kg CO2 eq/kg product  is the fertilizer EF
-pest_ef <- 25.5 # 25.5 kg cO2e/kg applied is the pesticides EF
-tpes_ef <- 34 #emissions factor for primary energy supply for Africa (34 tons CO2 eq/Terajoules), carbon intensity of energy mix
-
-kg_to_mt <- 1/10^9 #conversion factor for kg to megatons (million metric tons)
-tons_to_mt <- 1/10^6 #conversion factor for metric tons to megatons (million metric tons)
-Gg_to_mt <- 1/10^3 #conversion factor for gigatons to megatons (million metric tons)
-
-df_conv <- df_clean %>% 
-  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
-         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha
-         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
-         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
-         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
-         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha) #total emissions per ha in MMT CO2e
-
-#test output is as expected
-head(df_conv)
-```
-
-```{r Save non-aggregated regresion input data}
-write_csv(df_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted.csv")
-```
-
 ```{r Add region label for African countries} 
 #We create a new column here with the country name for all countries, but the region name fro Africa countries. THis is used below to aggregate African countries by region in order to mitigate issues with missing data for some countries. 
 
@@ -166,29 +140,29 @@ S_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Southern Afri
 N_Afr <- country_groupings %>% filter(`Sub-region Name`=="Northern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
 
 #define countries in Africa without matching names in faostat data in order to make names consistent for joining
-Africa[which(!Africa %in% unique(df_conv$country))]
+Africa[which(!Africa %in% unique(df_clean$country))]
 
 #match all possible, based on manual examination of faostat countries.  non-matching ones aren't listed separately in faostat
-df_conv$country <- recode(df_conv$country, "Côte d'Ivoire"="Côte d’Ivoire")
+df_clean$country <- recode(df_clean$country, "Côte d'Ivoire"="Côte d’Ivoire")
 
 #create new column with names as factors to revise
-df_conv <- mutate(df_conv, Country_rename = country)
+df_clean <- mutate(df_clean, Country_rename = country)
 
 # add region name for countries in african regions AND in list of africa countries included in FOFA. this ensures that later regressions are conducted such that the fixed effect for a region only includes countries that are in the region for which predictions are being made (i.e. FOFA projections for northern africa exclude libya)
 africa_scenario_countries <- read.csv(file = "int_data/countries_included_in_africa.csv")[,2]
-df_conv$Country_rename[df_conv$Country_rename %in% E_Afr & df_conv$country %in% africa_scenario_countries] <-  "E_Afr"
-df_conv$Country_rename[df_conv$Country_rename %in% W_Afr & df_conv$country %in% africa_scenario_countries] <-  "W_Afr"
-df_conv$Country_rename[df_conv$Country_rename %in% C_Afr & df_conv$country %in% africa_scenario_countries] <-  "C_Afr"
-df_conv$Country_rename[df_conv$Country_rename %in% S_Afr & df_conv$country %in% africa_scenario_countries] <-  "S_Afr"
-df_conv$Country_rename[df_conv$Country_rename %in% N_Afr & df_conv$country %in% africa_scenario_countries] <-  "N_Afr"
+df_clean$Country_rename[df_clean$Country_rename %in% E_Afr & df_clean$country %in% africa_scenario_countries] <-  "E_Afr"
+df_clean$Country_rename[df_clean$Country_rename %in% W_Afr & df_clean$country %in% africa_scenario_countries] <-  "W_Afr"
+df_clean$Country_rename[df_clean$Country_rename %in% C_Afr & df_clean$country %in% africa_scenario_countries] <-  "C_Afr"
+df_clean$Country_rename[df_clean$Country_rename %in% S_Afr & df_clean$country %in% africa_scenario_countries] <-  "S_Afr"
+df_clean$Country_rename[df_clean$Country_rename %in% N_Afr & df_clean$country %in% africa_scenario_countries] <-  "N_Afr"
 ```
 
 ```{r Aggregate data for each African region}
 #define function to aggregate each variable by region
 aggregate_df <- function(region_data, region_name){
   output <- region_data %>% ungroup() %>% select(year,cropland, tot_kcal, en_emiss, fert_use, pest_use, fert_emiss, m_energy) %>% 
-  group_by(year) %>%
-  summarise_all(sum, na.rm= TRUE) #sum total values across region by year
+    group_by(year) %>%
+    summarise_all(sum, na.rm= TRUE) #sum total values across region by year
   
   #calculate per hectare values
   output <- output %>% mutate(yield = tot_kcal/cropland, en_emiss_ha = en_emiss/cropland, p_ha = pest_use/cropland, fert_emiss_ha = fert_emiss/cropland, fert_use_ha = fert_use/cropland, m_energy_ha = m_energy/cropland, country = region_name)
@@ -197,11 +171,11 @@ aggregate_df <- function(region_data, region_name){
 }
 
 #filter data by region
-reg_E <- dplyr::filter(df_conv, Country_rename == "E_Afr" )
-reg_W <- dplyr::filter(df_conv, Country_rename == "W_Afr" )
-reg_C <- dplyr::filter(df_conv, Country_rename == "C_Afr" )
-reg_S <- dplyr::filter(df_conv, Country_rename == "S_Afr" )
-reg_N <- dplyr::filter(df_conv, Country_rename == "N_Afr" )
+reg_E <- dplyr::filter(df_clean, Country_rename == "E_Afr" )
+reg_W <- dplyr::filter(df_clean, Country_rename == "W_Afr" )
+reg_C <- dplyr::filter(df_clean, Country_rename == "C_Afr" )
+reg_S <- dplyr::filter(df_clean, Country_rename == "S_Afr" )
+reg_N <- dplyr::filter(df_clean, Country_rename == "N_Afr" )
 
 #aggregate values by region
 reg_E_aggregate <- aggregate_df(reg_E, "Eastern")
@@ -211,18 +185,60 @@ reg_S_aggregate <- aggregate_df(reg_S, "Southern")
 reg_N_aggregate <- aggregate_df(reg_N, "Northern")
 
 #Filter out Africa data from primary dataframe, keeping only non-Africa data 
-df_other_countries <- df_conv %>% filter(!Country_rename %in% c("N_Afr", "C_Afr", "S_Afr","E_Afr","W_Afr")) %>% select(-Country_rename)
+df_other_countries <- df_clean %>% filter(!Country_rename %in% c("N_Afr", "C_Afr", "S_Afr","E_Afr","W_Afr")) %>% select(-Country_rename)
 
 #Join aggregated Africa data with all of the countries' (non Africa) data
 df_agg <- bind_rows(df_other_countries, reg_C_aggregate, reg_E_aggregate, reg_S_aggregate, reg_W_aggregate, reg_N_aggregate)
 ```
 
-```{r Explore data and remove outlier yield values}
-#Make sure any newly created 0's are converted to NAs, lm function automatically removes data with NAs 
-df_agg <- naniar::replace_with_na_all(data = df_agg, condition = ~.x == 0)
+```{r Convert input use to consistent units of emissions per ha}
+#Define conversion factors and emission factors
+fert_ef <- 5.66 #5.66 kg CO2 eq/kg product  is the fertilizer EF
+pest_ef <- 25.5 # 25.5 kg cO2e/kg applied is the pesticides EF
+tpes_ef <- 34 #emissions factor for primary energy supply for Africa (34 tons CO2 eq/Terajoules), carbon intensity of energy mix
+
+kg_to_mt <- 1/10^9 #conversion factor for kg to megatons (million metric tons)
+tons_to_mt <- 1/10^6 #conversion factor for metric tons to megatons (million metric tons)
+Gg_to_mt <- 1/10^3 #conversion factor for gigatons to megatons (million metric tons)
+
+#convert for aggregated data
+df_agg_conv <- df_agg %>% 
+  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
+         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
+         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
+         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
+         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
+         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha, #total emissions per ha in MMT CO2e
+         en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
+         fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  )
+
+#convert for non-aggregated data. repeat of above
+df_conv <- df_clean %>% 
+  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
+         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
+         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
+         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
+         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
+         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha, #total emissions per ha in MMT CO2e
+         en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
+         fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  )
+
+#test output is as expected
+head(df_agg_conv)
 ```
 
-```{r Save aggregated regresion input data}
-write_csv(df_agg %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted_aggregated.csv")
+```{r Explore data and remove outlier yield values}
+#Make sure any newly created 0's are converted to NAs, lm function automatically removes data with NAs 
+df_agg_conv <- naniar::replace_with_na_all(data = df_agg, condition = ~.x == 0)
+```
+
+```{r Save regresion input data}
+#aggregated data used in regression
+write_csv(df_agg_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted_aggregated.csv")
+
+#non-aggregated regresion input data, for easy reference if needed
+write_csv(df_conv %>% select(country, year, cropland, en_emiss_ha, p_ha, fert_emiss_ha, m_energy_ha, yield), "int_data/input_data_cleaned_converted.csv")
 ```
 

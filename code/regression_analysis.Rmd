@@ -1,7 +1,7 @@
 ---
 title: "Regression Analysis for Emissions Predictions"
 authors: "Saloni Shah, Dan Blaustein-Rejto "
-date: "originally started 11/06/2020; last modified 1/24/2024"
+date: "originally started 11/06/2020"
 output: html_document
 ---
 #SETUP
@@ -120,13 +120,25 @@ scenarios_predictions <- scenarios_predictions %>% #add predictions of per hecta
 #calculate variance and 95% CI for total emissions per ha for each region
 library(car)
 
-# Function to calculate variance using delta method
+# Function to calculate variance using delta method.
+# This approach assumes the errors on the log scale are normally distributed.
+# It also assumes that the predicted values from the multiple models are independent. 
 calculate_variance <- function(model, new_data) {
+  #fit model
   predictions <- predict(model, newdata = new_data, se.fit = TRUE)
-  se_log <- predictions$se.fit
+  
+  #predicted mean on log scale
   pred_log <- predictions$fit
+  
+  #standard error of predicted mean on log scale
+  se_log <- predictions$se.fit
+  
+  #calculate variance on original scale
   pred <- exp(pred_log)
-  var_pred <- (exp(2 * pred_log) * se_log^2)
+  sigma_squared <- se_log^2
+  mu <- pred_log #use mu term to clarify equation below is standard log-normal variance calculation
+  
+  var_pred <- (exp(sigma_squared) - 1) * exp(2 * mu * sigma_squared)
   return(var_pred)
 }
 
@@ -136,18 +148,19 @@ z <- qnorm(0.975) # Z value for 95% CI
 # Calculating variances
 scenarios_predictions <- scenarios_predictions %>% 
   mutate( #calculate variances for each per ha value
-  var_e = calculate_variance(en_emiss_ols, scenarios_predictions),
-  var_f = calculate_variance(fert_emiss_ols, scenarios_predictions),
-  var_fm = calculate_variance(fert_m_emiss_ols, scenarios_predictions),
-  var_m = calculate_variance(m_emiss_ols, scenarios_predictions),
-  var_p = calculate_variance(pest_emiss_ols, scenarios_predictions),
-  var_t = var_e + var_f + var_fm + var_m + var_p) %>%  #calculate variance for total emissions/ha
+    var_e = calculate_variance(en_emiss_ols, scenarios_predictions),
+    var_f = calculate_variance(fert_emiss_ols, scenarios_predictions),
+    var_fm = calculate_variance(fert_m_emiss_ols, scenarios_predictions),
+    var_m = calculate_variance(m_emiss_ols, scenarios_predictions),
+    var_p = calculate_variance(pest_emiss_ols, scenarios_predictions),
+    var_t = var_e + var_f + var_fm + var_m + var_p) %>%  #calculate variance for total emissions/ha
   #calculate confidence intervals for each per ha value
-  pivot_longer(cols = -c(country, scenario, harv_area, yield, luc, arable_area, production), names_to = c(".value", "estimate"), names_pattern = "(.*)_(.*)") %>% 
+  pivot_longer(cols = -c(country, scenario, harv_area, yield, luc, arable_area, production), 
+               names_to = c(".value", "estimate"), 
+               names_pattern = "(.*)_(.*)") %>% 
   mutate(
     lwr_ha = ha - z * sqrt(var), #calculate using z value for CI
-    upr_ha = ha + z * sqrt(var)
-  ) %>% 
+    upr_ha = ha + z * sqrt(var)) %>% 
   rename(fit_ha = ha, var_ha = var)
 ```
 
