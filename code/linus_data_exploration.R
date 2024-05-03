@@ -1,3 +1,6 @@
+library(scales)
+
+
 eastern_df <- filter_reg %>% filter(country == "Western")
 lm_all <- lm(filter_reg, formula = log(fert_emiss_ha) ~ log(yield) + factor(country))
 lm_eastern <- lm(eastern_df, formula = log(fert_emiss_ha) ~ log(yield))
@@ -38,6 +41,17 @@ lm_2000$coefficients[2] # 0.8281306
 lm_all$coefficients[2]
 
 filter_reg %>%
-  ggplot(aes(x = log(yield), y = log(fert_emiss_ha))) +
+  #filter(year %in% 1990:2020) %>%
+  filter(log(yield) > 12) %>%
+  ggplot(aes(x = yield, y = fert_emiss_ha)) +
   geom_point() +
-  geom_smooth(method = "lm")
+  scale_x_continuous(trans = log_trans()) +
+  scale_y_continuous(trans = log_trans()) +
+  geom_smooth(method = "gam")
+
+lm_en <- lm(filter_reg %>% filter(year %in% 1990:2020), formula = log(en_emiss_ha) ~ log(yield))
+summary(lm_en)
+lm_en$coefficients[2]
+
+low_yield_obs <- filter_reg %>%
+  filter()
