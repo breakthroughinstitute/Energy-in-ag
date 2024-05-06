@@ -5,11 +5,11 @@ date: "originally started 11/06/2020"
 output: html_document
 ---
 #SETUP
-```{r Load packages}
+```{r Load packages, message = FALSE}
 library(tidyverse); library(naniar); library(janitor)
 ```
 
-```{r Import data}
+```{r Import data, message = FALSE}
 #input data for regressions: input use, input emissions and kcal per hectare by country and year, with african countries aggregatedd at region-level. filtered to remove outliers.
 filter_reg <- read_csv("int_data/input_data_cleaned_converted_aggregated.csv")
 
