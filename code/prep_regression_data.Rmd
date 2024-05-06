@@ -203,35 +203,42 @@ Gg_to_mt <- 1/10^3 #conversion factor for gigatons to megatons (million metric t
 
 #convert for aggregated data
 df_agg_conv <- df_agg %>% 
-  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
-         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
-         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
-         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
-         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
-         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha, #total emissions per ha in MMT CO2e
-         en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
-         fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  mutate(
+    en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
+    fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
+    fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
+    m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
+    pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
+    en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
+    fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  ) %>% 
+  mutate(
+    # Calculate total emissions per hectare in MMT CO2e. NAs treated as 0
+    tot_emiss_ha = rowSums(across(c(en_emiss_ha, fert_emiss_ha, fert_m_emiss_ha, m_emiss_ha, pest_emiss_ha)), na.rm = TRUE)
   )
 
 #convert for non-aggregated data. repeat of above
 df_conv <- df_clean %>% 
-  mutate(en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
-         fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
-         fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
-         m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
-         pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
-         tot_emiss_ha = en_emiss_ha + fert_emiss_ha + fert_m_emiss_ha + m_emiss_ha + pest_emiss_ha, #total emissions per ha in MMT CO2e
-         en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
-         fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  mutate(
+    en_emiss_ha = en_emiss_ha * Gg_to_mt,#convert gigagrams CO2e emissions from energy use per ha to MMT CO2e emissions from energy use per ha     
+    fert_emiss_ha = fert_emiss_ha * Gg_to_mt, #convert gigagrams CO2e emissions from fert use per ha to MMT CO2e emissions from fert use per ha
+    fert_m_emiss_ha = fert_use_ha * fert_ef * kg_to_mt, #convert kg fertilizer use/ha to MMT CO2e emissions from fertilizer manufacturing per ha
+    m_emiss_ha = m_energy_ha * tpes_ef * tons_to_mt, #convert from Terajoules per ha to MMT CO2e emissions per ha
+    pest_emiss_ha = p_ha * pest_ef * tons_to_mt, #convert tons pesticide use/ha to MMT CO2e emissions from pesticide manufacturing per ha
+    en_emiss = en_emiss * Gg_to_mt, #convert gigagrams CO2e emissions ha to MMT CO2e 
+    fert_emiss = fert_emiss * Gg_to_mt #convert gigagrams CO2e emissions ha to MMT CO2e 
+  ) %>% 
+  mutate(
+    # Calculate total emissions per hectare in MMT CO2e. NAs treated as 0
+    tot_emiss_ha = rowSums(across(c(en_emiss_ha, fert_emiss_ha, fert_m_emiss_ha, m_emiss_ha, pest_emiss_ha)), na.rm = TRUE)
   )
+
+#Make sure any newly created 0's are converted to NAs, lm function automatically removes data with NAs 
+df_agg_conv <- naniar::replace_with_na_all(data = df_agg_conv, condition = ~.x == 0)
+df_conv <- naniar::replace_with_na_all(data = df_conv, condition = ~.x == 0)
 
 #test output is as expected
 head(df_agg_conv)
-```
-
-```{r Explore data and remove outlier yield values}
-#Make sure any newly created 0's are converted to NAs, lm function automatically removes data with NAs 
-df_agg_conv <- naniar::replace_with_na_all(data = df_agg, condition = ~.x == 0)
 ```
 
 ```{r Save regresion input data}
