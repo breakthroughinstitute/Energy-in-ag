@@ -1,12 +1,13 @@
 # Setup -------------------------------------------------------------------
 library(tidyverse)
 # Load Data ---------------------------------------------------------------
-d <- read_csv("raw_data/FOFA2050CountryData_Crop-production.csv") #Import FOFA 2050 data
+d <- read_csv("raw_data/FOFA2050_crop_production_2025_2050.csv") #Import FOFA 2050 data
 
-d <- d %>% #filter data to arable land, harvested area, yield and cropping intensity for 2012 and 2050 (projected) only
-  filter(Scenario == "Business As Usual", Year %in% c(2012, 2050), !Indicator %in% c("Climate shifter", "Technology shifter")) %>% 
-  select(-c(Domain, CountryCode, Region, Units, Scenario)) %>% 
-  pivot_wider(names_from = Indicator,values_from = Value) %>% #create column for each variable
+d <- d %>% #filter data to arable land, harvested area, yield and cropping intensity for 2025 and 2050 (projected) only
+  filter(ScenarioName == "Business-As-Usual", Year %in% c(2025, 2050), !Indicator.Name %in% c("Climate shifter", "Technology shifter")) %>% 
+  select(Indicator.Name, RegionName, ElementName, ItemName, Year, V1) %>% 
+  rename(CountryName = RegionName, Item = ItemName, Element = ElementName) %>% #rename to col names used in code w/ earlier dataset
+  pivot_wider(names_from = Indicator.Name,values_from = V1) %>% #create column for each variable
   rename(a = `Arable land`, h = `Harvested area`, c = `Cropping intensity`, y = `Crop yield`) %>% 
   mutate(h = 1000*h) %>% #convert h from 1000 ha to ha
   mutate(p = h*y) %>%  #calculate production in tonnes
@@ -15,22 +16,22 @@ d <- d %>% #filter data to arable land, harvested area, yield and cropping inten
 
 # Calculate baseline, projected and high harvested area, arable, LUC --------
 d <- d %>%  
-  mutate(b_h = p_2050/y_2012,     #baseline harvested area = 2050 production/2012 yield = (2050 harvested area * 2050 yield) / 2012 yield
+  mutate(b_h = p_2050/y_2025,     #baseline harvested area = 2050 production/2025 yield = (2050 harvested area * 2050 yield) / 2025 yield
          p_h = p_2050/y_2050,      #projected harvested area = 2050 production/2050 yield = 2050 harvested area * (2050 yield/2050 yield) = 2050 harvested area
          
-         b_a = b_h/c_2012,   #baseline arable land = baseline harvested area/2012 cropping intensity
+         b_a = b_h/c_2025,   #baseline arable land = baseline harvested area/2025 cropping intensity
          p_a = p_h/c_2050,   #projected arable land = projected harvested area/2050 cropping intensity
          
-         h_a = ifelse(p_a < a_2012, p_a, a_2012),  #high arable land area is set to 2012 arable land area, to represent scenario w/ high enough yields to avoid land use change Except its set to projected arable area when that is less than 2012 arable area
+         h_a = ifelse(p_a < a_2025, p_a, a_2025),  #high arable land area is set to 2025 arable land area, to represent scenario w/ high enough yields to avoid land use change Except its set to projected arable area when that is less than 2025 arable area
          h_h = h_a*c_2050,  #high harvested area = high arable land * 2050 cropping intensity
          
          b_p = p_2050, #production is 2050 for all scenarios
          p_p = p_2050, #production is 2050 for all scenarios
          h_p = p_2050) %>%  #production is 2050 for all scenarios
-  #calculate land use change (l) = arable area under scenario - 2012 arable area. all in ha
-  mutate(b_l = b_a - a_2012, 
-         p_l = p_a - a_2012,
-         h_l = h_a  - a_2012)
+  #calculate land use change (l) = arable area under scenario - 2025 arable area. all in ha
+  mutate(b_l = b_a - a_2025, 
+         p_l = p_a - a_2025,
+         h_l = h_a  - a_2025)
 
 
 # Convert from tons to kcal -----------------------------------------------
@@ -93,7 +94,7 @@ write.csv(kcal_excluded_from_fofa, "results/Supplementary/kcal_excluded_from_fof
 d <- inner_join(d, kcal, by = c("Item" = "crop")) #inner join to keep only crops w/ kcal conversions
 
 #multiply all production columns by kcal/ton
-d <- d %>% mutate(across(c(p_2012, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
+d <- d %>% mutate(across(c(p_2025, p_2050, ends_with("p")), ~.x*kcal_per_tonne))
 
 #clean environment
 rm(citrus, kcal, cereals, cit, fruit, oilseeds, pulses, roots, swp, veg, dried_pulses, swp_yam, other_veg, other_fruit, other_cereals, other_oilseeds, other_roots) 
@@ -163,7 +164,7 @@ write_csv(d, "int_data/country_and_crop_scenarios_filtered.csv")
 
 # Aggregate by region -----------------------------------------------------
 scenario_d <- d %>% 
-  select(-ends_with("2012"), -ends_with("2050"), -kcal_per_tonne) %>%  #select only columns for scenarios
+  select(-ends_with("2025"), -ends_with("2050"), -kcal_per_tonne) %>%  #select only columns for scenarios
   filter(is.na(Africa)==F) %>% 
   pivot_longer(cols = b_h:h_l, names_to = c("scenario", "var"), values_to = "val", names_pattern = "(.)_(.)") %>% #create columns for each variable, but not each scenario. make dataframe long, 
   group_by(Item, Element, CountryName, region, Africa, scenario, var) %>% summarize(val=sum(val)) %>% #summarize for crops that werent grouped in FOFA but are in MAPSPAM e.g. bananas and plantains
