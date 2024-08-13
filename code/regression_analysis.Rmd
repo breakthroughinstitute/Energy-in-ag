@@ -317,7 +317,7 @@ detach("package:car", unload=TRUE) #remove to simplify use of recode function an
 
 region_key <- c(C_Afr="Middle", E_Afr="Eastern", N_Afr = "Northern", S_Afr="Southern", W_Afr="Western")
 
-convert_luc_co2 <- function(x){return(x * kg_to_mt/38)} # convert to million metric ton and divide by 38, the number of years between 2012 and 2050, this division annualizes the emissions
+convert_luc_co2 <- function(x){return(x * kg_to_mt/ (2050-2025))} # convert to million metric ton and divide by number of years between 2025 and 2050, this division annualizes the emissions
 
 luc_co2_region <- read_csv("int_data/luc_co2_region.csv") %>%  #read in kg CO2e from LUC by region and scenario, with low values calculated allowing for negative LUC for crops (i.e. restoration) and high values setting all negative LUC to 0.
   mutate(region = recode(region, !!!region_key)) %>%  #rename regions for joining
@@ -396,7 +396,7 @@ plot(f_linear$fitted.values, f_linear$model$`(fert_emiss_ha)`)
 plot(fert_emiss_ols$fitted.values, fert_emiss_ols$model$`log(fert_emiss_ha)`)
 ```
 
-```{r Calculate LUC and total input emissions by scenario and region, with data filter to after 1990}
+```{r Calculate LUC and total input emissions by scenario and region with data filter to after 1990}
 #re-run log-log regression with data filterted to adfter 1990, which is when pesticide use data is first available. all values are NA before then
 #fit log-log model for emissions per ha to filtered data set
 e_1990 <- lm(filter_reg %>% filter(year>=1990), formula = log(en_emiss_ha) ~ log(yield) + factor(country)) #Energy Emissions OLS Regression
