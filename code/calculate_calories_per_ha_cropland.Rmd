@@ -19,7 +19,7 @@ cal_conversions <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
 #units are kilocalorie per tonne. source: FAO
 
 cropland <- read_csv("raw_data/faostat/cropland.csv") %>% 
-  select(-Domain, -Element, -Item, cropland = Value, country = Area, year = Year) %>% 
+  select(cropland = Value, country = Area, year = Year) %>% 
   mutate(cropland = cropland * 1000) #original units for cropland are in 1000 ha. We convert to ha. Source: FAOSTAT
 ``` 
 
