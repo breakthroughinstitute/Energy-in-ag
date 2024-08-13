@@ -12,7 +12,7 @@ library(tidyverse)
 ```
 
 ```{r Load data}
-prod <- read_csv("raw_data/faostat/production_all_crops.csv") %>% select(country = Area, year = Year, crop = Item, production)
+prod <- read_csv("raw_data/faostat/production.csv")
 #units for production are in tonnes
 
 cal_conversions <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
@@ -40,7 +40,7 @@ cropland_countries <- unique(cropland$country) #list of unique countries in crop
 #list countries in cropland data not in production data
 t <- cropland_countries %in% unique(prod$country)  
 cropland_countries[!t] 
-#country names that are in cropland data but not production data. China missing because China is listed several times in cropland, as mainland, hong kong, Taiwan, and the sum of the three. for prodcution, its just listed as mainland, hong kong, and taiwan, which is appropriate for our analysis. Other countries missing are due to missing data, rather than differences in spelling or name.
+#country names that are in cropland data but not production data. Countries missing are due to missing data, rather than differences in spelling or name.
 ```
 
 ```{r Check for duplicates}
