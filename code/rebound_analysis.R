@@ -13,14 +13,14 @@ CO2_loss <- read_csv("int_data/LUC_CO2_crops.csv") %>% select(country = ADMIN, i
 
 
 # Define rebound scenarios --------
-#define vector of rebound values e.g. 10%, 20% that refer to the relationship between change in arable land area from 2012 to 2050 and change in yield from 2012 to 2050
-r <- seq(from = 0, to = 1, by = 0.1)
+#define vector of rebound values e.g. 10%, 20% that refer to the relationship between change in arable land area from 2025 to 2050 and change in yield from 2025 to 2050
+r <- seq(from = 0, to = 1.2, by = 0.1)
 
 # Calculate baseline and high yield 
 d <- d %>%  
   mutate(h_y = p_2050/h_h,   #calculate yield for high and baseline scenario in kcalories. units irrelevant as long as consistent
          b_y = p_2050/b_h) %>%
-  select(Item, Element, CountryName, h_a, a_2012, h_y, b_y, region) #remove unneeded columns
+  select(Item, Element, CountryName, h_a, a_2025, h_y, b_y, region) #remove unneeded columns
   
 # Calculate arable land for each rebound value for the high scenario
 
@@ -28,7 +28,7 @@ d <- d %>%
 new_columns <- map_dfc(r, ~{
   # Calculate arable and luc columns based on the current value of r, with arable land calculated by multiplying percent change in yield by rebound e.g. 100% rebound means arable land increases as much as yield does; 50% means it increases half as much
   a <- d$h_a * (1 + ((d$h_y / d$b_y - 1) * .x)) #arable
-  l <- a - d$a_2012 #calculate land use change for each rebound value
+  l <- a - d$a_2025 #calculate land use change for each rebound value
   
   # Create a new dataframe with these two columns and set their names
   new_cols_df <- data.frame(a, l) %>%
@@ -40,17 +40,17 @@ new_columns <- map_dfc(r, ~{
 # Bind the new columns to the original dataframe
 d <- bind_cols(d, new_columns)
 
-d <- select(d, -c(h_a, a_2012, h_y, b_y)) #remove unneeded columns
+d <- select(d, -c(h_a, a_2025, h_y, b_y)) #remove unneeded columns
 
 
 # # Calculate total LUC CO2 by country and crop for each rebound scenario -------------------------------------------------
 
 #sum irrigated and rainfed LUC by country, item and scenario, keeping region variable. note this combines LUC for bananas & plantains into banp
-d <- d %>% group_by(Item, CountryName, region) %>% summarize(across(a_0:l_1, \(x) sum(x, na.rm=T)))
+d <- d %>% group_by(Item, CountryName, region) %>% summarize(across(a_0:l_1.2, \(x) sum(x, na.rm=T)))
 
 #join co2/ha value to LUC dataframe and calculate total LUC kg CO2 loss/emissions by crop
 LUC_CO2 <- inner_join(d, CO2_loss, by = c("CountryName" = "country", "Item" = "id")) %>%  #eliminates crops (just bean) in LUC dataset that do not have corresponding crop match in the CO2_loss dataset (derived from MAPSPAM analysis). 
-  pivot_longer(a_0:l_1, names_to = c("var", "rebound"), names_sep = "_", values_to = "val") %>%  #make long
+  pivot_longer(a_0:l_1.2, names_to = c("var", "rebound"), names_sep = "_", values_to = "val") %>%  #make long
   pivot_wider(names_from = var, values_from = val) %>% #make separate columns for land use change and arable land
   pivot_longer(c(tot_H, tot_S), names_to = c("y", "c_loss_ratio"), names_sep = "_", values_to = "co2_ha") %>%
   select(-y) %>%
