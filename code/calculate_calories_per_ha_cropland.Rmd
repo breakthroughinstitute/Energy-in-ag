@@ -12,7 +12,7 @@ library(tidyverse)
 ```
 
 ```{r Load data}
-prod <- read_csv("raw_data/faostat/production.csv")
+prod <- read_csv("raw_data/faostat/production.csv",  locale = locale(encoding = "UTF-8"))
 #units for production are in tonnes
 
 cal_conversions <- read_csv("raw_data/cal_per_tonne_by_crop.csv")
@@ -23,24 +23,83 @@ cropland <- read_csv("raw_data/faostat/cropland.csv") %>%
   mutate(cropland = cropland * 1000) #original units for cropland are in 1000 ha. We convert to ha. Source: FAOSTAT
 ``` 
 
-```{r Check if crop types in cal_conversions match those in FAOSTAT_production_all_crops and replace non-matching crop names }
+```{r Check if crop types in cal_conversions match those in FAOSTAT_production_all_crops}
 crop_FAO <- as.data.frame(unique(prod$crop))
 crop_cal<- as.data.frame(unique(cal_conversions$crop))
 colnames(crop_FAO) <- "crop"
 colnames(crop_cal) <- "crop"
-crop_diff <- anti_join(crop_FAO,crop_cal,by = "crop") #these crop types are found in the crop_FAO dataset but not found in the crop_cal dataset, 61 different crop names
-crop_diff2 <- anti_join(crop_cal,crop_FAO,by = "crop") #all crop types in crops_cal are found in crop_FAO
+crop_diff <- anti_join(crop_FAO,crop_cal,by = "crop") #these crop types are found in the crop_FAO dataset but not found in the crop_cal dataset, 88 different crop names
+crop_diff2 <- anti_join(crop_cal,crop_FAO,by = "crop") #36 crop types in crops_cal not found in crop_FAO
 
 #Checked crop names in crop_diff against names in crop_cal by eye in case there are spelling differences, no matches
 ``` 
 
+```{r Replace non-matching crop names }
+#define names in crop conversions to replace with names in FAO crop production data; old name = new name format
+crop_replacements <- c("Almonds, with shell" = "Almonds, in shell",
+                       "Bambara beans" = "Bambara beans, dry",
+                       "Beans, green" = "Other beans, green",
+                       "Brazil nuts, with shell" = "Brazil nuts, in shell",
+                       "Broad beans, horse beans, dry" = "Broad beans and horse beans, dry",
+                       "Cabbages and other brassicas" = "Cabbages",
+                       "Carobs" = "Locust beans (carobs)",
+                       "Cashew nuts, with shell" = "Cashew nuts, in shell",
+                       "Cassava" = "Cassava, fresh",
+                       "Chestnut" = "Chestnuts, in shell",
+                       "Chick peas" = "Chick peas, dry",
+                       "Chillies and peppers, dry" = "Chillies and peppers, dry (Capsicum spp., Pimenta spp.), raw",
+                       "Chillies and peppers, green" = "Chillies and peppers, green (Capsicum spp. and Pimenta spp.)",
+                       "Coconuts" = "Coconuts, in shell",
+                       "Cottonseed" = "Seed cotton, unginned",
+                       "Grain, mixed" = "Cereals n.e.c.",
+                       "Grapefruit (inc. pomelos)" = "Pomelos and grapefruits",
+                       "Groundnuts, with shell" = "Groundnuts, excluding shelled",
+                       "Hazelnuts, with shell" = "Hazelnuts, in shell",
+                       #"Kapokseed in shell" = 
+                       "Lentils" = "Lentils, dry",
+                       "Maize" = "Maize (corn)",
+                       "Maize, green" = "Green corn (maize)",
+                       "Mangoes, mangosteens, guavas" = "Mangoes, guavas and mangosteens",
+                       "Onions, dry" = "Onions and shallots, dry (excluding dehydrated)",
+                       "Onions, shallots, green" = "Onions and shallots, green",
+                       "Pigeon peas" = "Pigeon peas, dry",
+                       "Pistachios" = "Pistachios, in shell",
+                       "Plantains and others" = "Plantains and cooking bananas",
+                       "Rapeseed" = "Rape or colza seed",
+                       "Rice, paddy" = "Rice",
+                       "Soybeans" = "Soya beans",
+                       "Tangerines, mandarins, clementines, satsumas" = "Tangerines, mandarins, clementines",
+                       "Taro (cocoyam)" = "Taro",
+                       "Walnuts, with shell" = "Walnuts, in shell",
+                       "Yautia (cocoyam)" = "Yautia")
+
+#crops in nutritive factors but not faostat primary crops:	Kapokseed in shell
+
+#replace names
+cal_conversions <- cal_conversions %>%
+  mutate(crop = recode(crop, !!!crop_replacements))
+
+#check replacement worked
+crop_cal<- as.data.frame(unique(cal_conversions$crop))
+colnames(crop_cal) <- "crop"
+crop_diff <- anti_join(crop_FAO,crop_cal,by = "crop") #53 not found now. 
+crop_diff2 <- anti_join(crop_cal,crop_FAO,by = "crop") #1 crop types in crops_cal not found in crop_FAO now, kapokseed
+#no further crop mismatches identified by manual examination
+```
+
 ```{r Check if country names consistent}
 cropland_countries <- unique(cropland$country) #list of unique countries in cropland data
+production_countries <- unique(prod$country)
 
 #list countries in cropland data not in production data
-t <- cropland_countries %in% unique(prod$country)  
+t <- cropland_countries %in% production_countries
 cropland_countries[!t] 
 #country names that are in cropland data but not production data. Countries missing are due to missing data, rather than differences in spelling or name.
+
+t2 <- production_countries %in% cropland_countries
+production_countries[!t2] 
+#countries in produciton data that aren't in cropland are primarily regions and groupings of countries already includede.g.. China (grouping of mainland, taiwan etc.)
+#individual entries that don't match are China, Macao SAR. I manually confirmed this data is missing/NA in FAOSTAT Land Use Domain for cropland
 ```
 
 ```{r Check for duplicates}
@@ -55,21 +114,11 @@ prod <- prod %>% inner_join(cal_conversions) %>%
 ```
 
 ```{r Basic exploratory analysis - check for Os and NAs in dataset}
-sum(is.na(prod$Kcal)) #35068 NAs, about 9% of rows
-prod %>% group_by(year) %>% summarize(sum(is.na(Kcal))) #NAs not evenly distributed in time; concentrated before ~1990
-prod %>% group_by(crop) %>% summarize("na"=sum(is.na(Kcal))) %>% arrange(desc(na)) #NAs concentrated in some crops e.g. pumpokings, beans, carrots, cabbage. few for major staples like wheat, oats, fonio, bambara,rice, opil palm, maize
-prod %>% group_by(country) %>% summarize("na"=sum(is.na(Kcal))) %>% arrange(desc(na)) #wide dispersion in NAs by country
-```
-
-```{r Remove incomplete country-crop rows}
-#given future reliance on panel data about yields (in kcal) over time in countries, and time trend in NAs, keeping NAs could bias future results. E.g. it would make it seem like yields rose quicker after 1990 than they really did just because more data was reported. So we omit country-crop combinations that are incomplete
-
-na_tots <- prod %>% group_by(crop, country) %>% summarize(na = sum(is.na(production)))
-prod <- left_join(prod, na_tots)
-prod2 <- prod %>% filter(na==0)
-
-sum(prod2$Kcal) / sum(prod$Kcal, na.rm=T) #removing NAs only reduced total production in kcal from 1961-2017 by ~0.2%. We therefore implement this filtering.
-prod <- prod2
+sum(is.na(prod$Kcal)) #no NAs, as expected since removed when dataset created
+sum(is.na(prod$kcal_per_tonne)==T) #no NAs, as expected since inner join used above
+sum(prod$Kcal==0) #60117, 10.3% of all entries
+zeros <- prod[prod$Kcal==0,] #create df of entries w/ 0. 
+#all zero values are due to the value for production being 0. this does not affect future calculations and so we leave these in. removing them would have no effect.
 ```
 
 ```{r Join production and cropland data}
