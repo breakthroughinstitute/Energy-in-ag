@@ -156,6 +156,9 @@ C_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Middle Africa
 S_Afr <- country_groupings %>% filter(`Intermediate Region Name`=="Southern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
 N_Afr <- country_groupings %>% filter(`Sub-region Name`=="Northern Africa") %>% select(`Country or Area`) %>% arrange(`Country or Area`) %>% pull()
 
+# Save the vectors to an .RData file to reference in regression analysis
+save(Africa, W_Afr, E_Afr,C_Afr, S_Afr,N_Afr, file = "regions.RData")
+
 #define countries in Africa without matching names in faostat data in order to make names consistent for joining
 Africa[which(!Africa %in% unique(df_clean$country))]
 
