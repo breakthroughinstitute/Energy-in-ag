@@ -832,7 +832,7 @@ luc_co2_region %>%
 #generate table with the sensitivity analysis results for LUC and total input emissions by scenario and region, under linear model
 africa_linear_sums %>% 
   filter(c_loss_ratio == c_loss_selected) %>% 
-  select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
+  select(Region = region, Scenario = scenario, `Land-Use Change` = luc_co2_high, `Input Use` = tot_emiss, `Total` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS12_LUC_and_total_input_emissions_mha_by_region_linear_model.csv")
@@ -841,7 +841,7 @@ africa_linear_sums %>%
 ```{r Table S13. Sensitivity analysis: LUC and total input emissions by scenario and region, data filtered to >=1990}
 africa_1990_sums %>% 
   filter(c_loss_ratio == c_loss_selected) %>% 
-  select(Region = region, Scenario = scenario, `LUC emissions (Mt CO2e)` = luc_co2_high, `Total input emissions (Mt CO2e)` = tot_emiss, `Total emissions (Mt CO2e)` = tot_co2_high) %>% 
+  select(Region = region, Scenario = scenario, `Land-Use Change` = luc_co2_high, `Input Use` = tot_emiss, `Total` = tot_co2_high) %>% 
   mutate(Scenario = factor(Scenario, levels = c("Baseline", "Projected", "High"))) %>% arrange(Scenario) %>% #reorder scenario column
   mutate(across(where(is.numeric), round, digits = decimals)) %>%  # Adjust the number of digits as needed
   write_csv("results/tables/tableS13_LUC_and_total_input_emissions_mha_by_region_post1990.csv")
